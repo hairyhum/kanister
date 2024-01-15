@@ -10,6 +10,9 @@ cohesive APIs for defining and curating data operations by abstracting away
 tedious details around executing data operations on Kubernetes. It's extensible
 and easy to install, operate and scale.
 
+
+
+
 ## Highlights
 
 ✅ _Kubernetes centric_ - Kanister's APIs are implemented as [Custom Resource
