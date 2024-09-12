@@ -29,11 +29,13 @@ import (
 	kanister "github.com/kanisterio/kanister/pkg"
 	crv1alpha1 "github.com/kanisterio/kanister/pkg/apis/cr/v1alpha1"
 	"github.com/kanisterio/kanister/pkg/consts"
+	"github.com/kanisterio/kanister/pkg/ephemeral"
 	"github.com/kanisterio/kanister/pkg/format"
 	"github.com/kanisterio/kanister/pkg/kube"
 	"github.com/kanisterio/kanister/pkg/param"
 	"github.com/kanisterio/kanister/pkg/progress"
 	"github.com/kanisterio/kanister/pkg/restic"
+	"github.com/kanisterio/kanister/pkg/utils"
 )
 
 const (
@@ -79,11 +81,14 @@ func deleteData(
 	reclaimSpace bool,
 	namespace,
 	encryptionKey string,
+	insecureTLS bool,
 	targetPaths,
 	deleteTags,
 	deleteIdentifiers []string,
 	jobPrefix string,
 	podOverride crv1alpha1.JSONMap,
+	annotations,
+	labels map[string]string,
 ) (map[string]interface{}, error) {
 	if (len(deleteIdentifiers) == 0) == (len(deleteTags) == 0) {
 		return nil, errors.Errorf("Require one argument: %s or %s", DeleteDataBackupIdentifierArg, DeleteDataBackupTagArg)
@@ -95,9 +100,15 @@ func deleteData(
 		Image:        consts.GetKanisterToolsImage(),
 		Command:      []string{"sh", "-c", "tail -f /dev/null"},
 		PodOverride:  podOverride,
+		Annotations:  annotations,
+		Labels:       labels,
 	}
+
+	// Apply the registered ephemeral pod changes.
+	ephemeral.PodOptions.Apply(options)
+
 	pr := kube.NewPodRunner(cli, options)
-	podFunc := deleteDataPodFunc(tp, reclaimSpace, encryptionKey, targetPaths, deleteTags, deleteIdentifiers)
+	podFunc := deleteDataPodFunc(tp, reclaimSpace, encryptionKey, insecureTLS, targetPaths, deleteTags, deleteIdentifiers)
 	return pr.Run(ctx, podFunc)
 }
 
@@ -106,6 +117,7 @@ func deleteDataPodFunc(
 	tp param.TemplateParams,
 	reclaimSpace bool,
 	encryptionKey string,
+	insecureTLS bool,
 	targetPaths,
 	deleteTags,
 	deleteIdentifiers []string,
@@ -133,7 +145,7 @@ func deleteDataPodFunc(
 		}
 
 		for i, deleteTag := range deleteTags {
-			cmd, err := restic.SnapshotsCommandByTag(tp.Profile, targetPaths[i], deleteTag, encryptionKey)
+			cmd, err := restic.SnapshotsCommandByTag(tp.Profile, targetPaths[i], deleteTag, encryptionKey, insecureTLS)
 			if err != nil {
 				return nil, err
 			}
@@ -153,7 +165,7 @@ func deleteDataPodFunc(
 		}
 		var spaceFreedTotal int64
 		for i, deleteIdentifier := range deleteIdentifiers {
-			cmd, err := restic.ForgetCommandByID(tp.Profile, targetPaths[i], deleteIdentifier, encryptionKey)
+			cmd, err := restic.ForgetCommandByID(tp.Profile, targetPaths[i], deleteIdentifier, encryptionKey, insecureTLS)
 			if err != nil {
 				return nil, err
 			}
@@ -166,7 +178,7 @@ func deleteDataPodFunc(
 				return nil, errors.Wrapf(err, "Failed to forget data")
 			}
 			if reclaimSpace {
-				spaceFreedStr, err := pruneData(tp, pod, podCommandExecutor, encryptionKey, targetPaths[i])
+				spaceFreedStr, err := pruneData(tp, pod, podCommandExecutor, encryptionKey, targetPaths[i], insecureTLS)
 				if err != nil {
 					return nil, errors.Wrapf(err, "Error executing prune command")
 				}
@@ -186,8 +198,9 @@ func pruneData(
 	podCommandExecutor kube.PodCommandExecutor,
 	encryptionKey,
 	targetPath string,
+	insecureTLS bool,
 ) (string, error) {
-	cmd, err := restic.PruneCommand(tp.Profile, targetPath, encryptionKey)
+	cmd, err := restic.PruneCommand(tp.Profile, targetPath, encryptionKey, insecureTLS)
 	if err != nil {
 		return "", err
 	}
@@ -209,6 +222,8 @@ func (d *deleteDataFunc) Exec(ctx context.Context, tp param.TemplateParams, args
 	var namespace, deleteArtifactPrefix, deleteIdentifier, deleteTag, encryptionKey string
 	var reclaimSpace bool
 	var err error
+	var insecureTLS bool
+	var bpAnnotations, bpLabels map[string]string
 	if err = Arg(args, DeleteDataNamespaceArg, &namespace); err != nil {
 		return nil, err
 	}
@@ -227,9 +242,33 @@ func (d *deleteDataFunc) Exec(ctx context.Context, tp param.TemplateParams, args
 	if err = OptArg(args, DeleteDataReclaimSpace, &reclaimSpace, false); err != nil {
 		return nil, err
 	}
+	if err = OptArg(args, InsecureTLS, &insecureTLS, false); err != nil {
+		return nil, err
+	}
+	if err = OptArg(args, PodAnnotationsArg, &bpAnnotations, nil); err != nil {
+		return nil, err
+	}
+	if err = OptArg(args, PodLabelsArg, &bpLabels, nil); err != nil {
+		return nil, err
+	}
+
 	podOverride, err := GetPodSpecOverride(tp, args, DeleteDataPodOverrideArg)
 	if err != nil {
 		return nil, err
+	}
+
+	annotations := bpAnnotations
+	labels := bpLabels
+	if tp.PodAnnotations != nil {
+		// merge the actionset annotations with blueprint annotations
+		var actionSetAnn ActionSetAnnotations = tp.PodAnnotations
+		annotations = actionSetAnn.MergeBPAnnotations(bpAnnotations)
+	}
+
+	if tp.PodLabels != nil {
+		// merge the actionset labels with blueprint labels
+		var actionSetLabels ActionSetLabels = tp.PodLabels
+		labels = actionSetLabels.MergeBPLabels(bpLabels)
 	}
 
 	if err = ValidateProfile(tp.Profile); err != nil {
@@ -242,7 +281,22 @@ func (d *deleteDataFunc) Exec(ctx context.Context, tp param.TemplateParams, args
 	if err != nil {
 		return nil, errors.Wrapf(err, "Failed to create Kubernetes client")
 	}
-	return deleteData(ctx, cli, tp, reclaimSpace, namespace, encryptionKey, strings.Fields(deleteArtifactPrefix), strings.Fields(deleteTag), strings.Fields(deleteIdentifier), deleteDataJobPrefix, podOverride)
+	return deleteData(
+		ctx,
+		cli,
+		tp,
+		reclaimSpace,
+		namespace,
+		encryptionKey,
+		insecureTLS,
+		strings.Fields(deleteArtifactPrefix),
+		strings.Fields(deleteTag),
+		strings.Fields(deleteIdentifier),
+		deleteDataJobPrefix,
+		podOverride,
+		annotations,
+		labels,
+	)
 }
 
 func (*deleteDataFunc) RequiredArgs() []string {
@@ -260,7 +314,22 @@ func (*deleteDataFunc) Arguments() []string {
 		DeleteDataBackupTagArg,
 		DeleteDataEncryptionKeyArg,
 		DeleteDataReclaimSpace,
+		InsecureTLS,
+		PodAnnotationsArg,
+		PodLabelsArg,
 	}
+}
+
+func (d *deleteDataFunc) Validate(args map[string]any) error {
+	if err := ValidatePodLabelsAndAnnotations(d.Name(), args); err != nil {
+		return err
+	}
+
+	if err := utils.CheckSupportedArgs(d.Arguments(), args); err != nil {
+		return err
+	}
+
+	return utils.CheckRequiredArgs(d.RequiredArgs(), args)
 }
 
 func (d *deleteDataFunc) ExecutionProgress() (crv1alpha1.PhaseProgress, error) {

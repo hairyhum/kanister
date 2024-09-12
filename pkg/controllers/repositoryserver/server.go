@@ -21,14 +21,15 @@ import (
 	"os"
 	"time"
 
+	"github.com/pkg/errors"
+	"k8s.io/kube-openapi/pkg/util/sets"
+
 	"github.com/kanisterio/kanister/pkg/format"
 	"github.com/kanisterio/kanister/pkg/kopia"
 	"github.com/kanisterio/kanister/pkg/kopia/command"
 	"github.com/kanisterio/kanister/pkg/kopia/maintenance"
 	"github.com/kanisterio/kanister/pkg/kube"
 	reposerver "github.com/kanisterio/kanister/pkg/secrets/repositoryserver"
-	"github.com/pkg/errors"
-	"k8s.io/kube-openapi/pkg/util/sets"
 )
 
 const (
@@ -64,7 +65,7 @@ func (h *RepoServerHandler) startRepoProxyServer(ctx context.Context) (err error
 			Background:       true,
 		},
 	)
-	stdout, stderr, err := kube.Exec(h.KubeCli, h.RepositoryServer.Namespace, h.RepositoryServer.Status.ServerInfo.PodName, repoServerPodContainerName, cmd, nil)
+	stdout, stderr, err := kube.Exec(ctx, h.KubeCli, h.RepositoryServer.Namespace, h.RepositoryServer.Status.ServerInfo.PodName, repoServerPodContainerName, cmd, nil)
 	format.Log(h.RepositoryServer.Status.ServerInfo.PodName, repoServerPodContainerName, stdout)
 	format.Log(h.RepositoryServer.Status.ServerInfo.PodName, repoServerPodContainerName, stderr)
 	if err != nil {
@@ -99,7 +100,7 @@ func (h *RepoServerHandler) checkServerStatus(ctx context.Context, serverAddress
 	if err != nil {
 		return errors.Wrap(err, "Failed to extract fingerprint from Kopia API server certificate secret data")
 	}
-	stdout, stderr, exErr := kube.Exec(h.KubeCli, h.RepositoryServer.Namespace, h.RepositoryServer.Status.ServerInfo.PodName, repoServerPodContainerName, cmd, nil)
+	stdout, stderr, exErr := kube.Exec(ctx, h.KubeCli, h.RepositoryServer.Namespace, h.RepositoryServer.Status.ServerInfo.PodName, repoServerPodContainerName, cmd, nil)
 	format.Log(h.RepositoryServer.Status.ServerInfo.PodName, repoServerPodContainerName, stdout)
 	format.Log(h.RepositoryServer.Status.ServerInfo.PodName, repoServerPodContainerName, stderr)
 	return exErr
@@ -127,7 +128,7 @@ func (h *RepoServerHandler) createOrUpdateClientUsers(ctx context.Context) error
 				LogDirectory:   command.DefaultLogDirectory,
 			},
 		})
-	stdout, stderr, err := kube.Exec(h.KubeCli, h.RepositoryServer.Namespace, h.RepositoryServer.Status.ServerInfo.PodName, repoServerPodContainerName, cmd, nil)
+	stdout, stderr, err := kube.Exec(ctx, h.KubeCli, h.RepositoryServer.Namespace, h.RepositoryServer.Status.ServerInfo.PodName, repoServerPodContainerName, cmd, nil)
 	format.Log(h.RepositoryServer.Status.ServerInfo.PodName, repoServerPodContainerName, stdout)
 	format.Log(h.RepositoryServer.Status.ServerInfo.PodName, repoServerPodContainerName, stderr)
 	if err != nil {
@@ -164,7 +165,7 @@ func (h *RepoServerHandler) createOrUpdateClientUsers(ctx context.Context) error
 					NewUsername:  serverUsername,
 					UserPassword: string(password),
 				})
-			stdout, stderr, err := kube.Exec(h.KubeCli, h.RepositoryServer.Namespace, h.RepositoryServer.Status.ServerInfo.PodName, repoServerPodContainerName, cmd, nil)
+			stdout, stderr, err := kube.Exec(ctx, h.KubeCli, h.RepositoryServer.Namespace, h.RepositoryServer.Status.ServerInfo.PodName, repoServerPodContainerName, cmd, nil)
 			format.Log(h.RepositoryServer.Status.ServerInfo.PodName, repoServerPodContainerName, stdout)
 			format.Log(h.RepositoryServer.Status.ServerInfo.PodName, repoServerPodContainerName, stderr)
 			if err != nil {
@@ -182,7 +183,7 @@ func (h *RepoServerHandler) createOrUpdateClientUsers(ctx context.Context) error
 				NewUsername:  serverUsername,
 				UserPassword: string(password),
 			})
-		stdout, stderr, err := kube.Exec(h.KubeCli, h.RepositoryServer.Namespace, h.RepositoryServer.Status.ServerInfo.PodName, repoServerPodContainerName, cmd, nil)
+		stdout, stderr, err := kube.Exec(ctx, h.KubeCli, h.RepositoryServer.Namespace, h.RepositoryServer.Status.ServerInfo.PodName, repoServerPodContainerName, cmd, nil)
 		format.Log(h.RepositoryServer.Status.ServerInfo.PodName, repoServerPodContainerName, stdout)
 		format.Log(h.RepositoryServer.Status.ServerInfo.PodName, repoServerPodContainerName, stderr)
 		if err != nil {
@@ -215,7 +216,7 @@ func (h *RepoServerHandler) refreshServer(ctx context.Context) error {
 			ServerPassword: password,
 			Fingerprint:    fingerprint,
 		})
-	stdout, stderr, err := kube.Exec(h.KubeCli, h.RepositoryServer.Namespace, h.RepositoryServer.Status.ServerInfo.PodName, repoServerPodContainerName, cmd, nil)
+	stdout, stderr, err := kube.Exec(ctx, h.KubeCli, h.RepositoryServer.Namespace, h.RepositoryServer.Status.ServerInfo.PodName, repoServerPodContainerName, cmd, nil)
 	format.Log(h.RepositoryServer.Status.ServerInfo.PodName, repoServerPodContainerName, stdout)
 	format.Log(h.RepositoryServer.Status.ServerInfo.PodName, repoServerPodContainerName, stderr)
 	if err != nil {

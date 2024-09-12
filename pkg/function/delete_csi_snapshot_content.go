@@ -18,13 +18,15 @@ import (
 	"context"
 	"time"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 	kanister "github.com/kanisterio/kanister/pkg"
 	crv1alpha1 "github.com/kanisterio/kanister/pkg/apis/cr/v1alpha1"
 	"github.com/kanisterio/kanister/pkg/kube"
 	"github.com/kanisterio/kanister/pkg/kube/snapshot"
 	"github.com/kanisterio/kanister/pkg/param"
 	"github.com/kanisterio/kanister/pkg/progress"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"github.com/kanisterio/kanister/pkg/utils"
 )
 
 func init() {
@@ -89,6 +91,14 @@ func (*deleteCSISnapshotContentFunc) Arguments() []string {
 	return []string{
 		DeleteCSISnapshotContentNameArg,
 	}
+}
+
+func (d *deleteCSISnapshotContentFunc) Validate(args map[string]any) error {
+	if err := utils.CheckSupportedArgs(d.Arguments(), args); err != nil {
+		return err
+	}
+
+	return utils.CheckRequiredArgs(d.RequiredArgs(), args)
 }
 
 func (c *deleteCSISnapshotContentFunc) ExecutionProgress() (crv1alpha1.PhaseProgress, error) {

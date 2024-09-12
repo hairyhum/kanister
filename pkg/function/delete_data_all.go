@@ -29,6 +29,7 @@ import (
 	"github.com/kanisterio/kanister/pkg/param"
 	"github.com/kanisterio/kanister/pkg/progress"
 	"github.com/kanisterio/kanister/pkg/restic"
+	"github.com/kanisterio/kanister/pkg/utils"
 )
 
 const (
@@ -71,6 +72,8 @@ func (d *deleteDataAllFunc) Exec(ctx context.Context, tp param.TemplateParams, a
 	var namespace, deleteArtifactPrefix, backupInfo, encryptionKey string
 	var reclaimSpace bool
 	var err error
+	var insecureTLS bool
+	var bpAnnotations, bpLabels map[string]string
 	if err = Arg(args, DeleteDataAllNamespaceArg, &namespace); err != nil {
 		return nil, err
 	}
@@ -86,9 +89,32 @@ func (d *deleteDataAllFunc) Exec(ctx context.Context, tp param.TemplateParams, a
 	if err = OptArg(args, DeleteDataAllReclaimSpace, &reclaimSpace, false); err != nil {
 		return nil, err
 	}
+	if err = OptArg(args, InsecureTLS, &insecureTLS, false); err != nil {
+		return nil, err
+	}
+	if err = OptArg(args, PodAnnotationsArg, &bpAnnotations, nil); err != nil {
+		return nil, err
+	}
+	if err = OptArg(args, PodLabelsArg, &bpLabels, nil); err != nil {
+		return nil, err
+	}
 	podOverride, err := GetPodSpecOverride(tp, args, DeleteDataAllPodOverrideArg)
 	if err != nil {
 		return nil, err
+	}
+
+	annotations := bpAnnotations
+	labels := bpLabels
+	if tp.PodAnnotations != nil {
+		// merge the actionset annotations with blueprint annotations
+		var actionSetAnn ActionSetAnnotations = tp.PodAnnotations
+		annotations = actionSetAnn.MergeBPAnnotations(bpAnnotations)
+	}
+
+	if tp.PodLabels != nil {
+		// merge the actionset labels with blueprint labels
+		var actionSetLabels ActionSetLabels = tp.PodLabels
+		labels = actionSetLabels.MergeBPLabels(bpLabels)
 	}
 
 	if err = ValidateProfile(tp.Profile); err != nil {
@@ -110,7 +136,22 @@ func (d *deleteDataAllFunc) Exec(ctx context.Context, tp param.TemplateParams, a
 		deleteIdentifiers = append(deleteIdentifiers, info.BackupID)
 	}
 
-	return deleteData(ctx, cli, tp, reclaimSpace, namespace, encryptionKey, targetPaths, nil, deleteIdentifiers, deleteDataAllJobPrefix, podOverride)
+	return deleteData(
+		ctx,
+		cli,
+		tp,
+		reclaimSpace,
+		namespace,
+		encryptionKey,
+		insecureTLS,
+		targetPaths,
+		nil,
+		deleteIdentifiers,
+		deleteDataAllJobPrefix,
+		podOverride,
+		annotations,
+		labels,
+	)
 }
 
 func (*deleteDataAllFunc) RequiredArgs() []string {
@@ -128,7 +169,22 @@ func (*deleteDataAllFunc) Arguments() []string {
 		DeleteDataAllBackupInfo,
 		DeleteDataAllEncryptionKeyArg,
 		DeleteDataAllReclaimSpace,
+		InsecureTLS,
+		PodAnnotationsArg,
+		PodLabelsArg,
 	}
+}
+
+func (d *deleteDataAllFunc) Validate(args map[string]any) error {
+	if err := ValidatePodLabelsAndAnnotations(d.Name(), args); err != nil {
+		return err
+	}
+
+	if err := utils.CheckSupportedArgs(d.Arguments(), args); err != nil {
+		return err
+	}
+
+	return utils.CheckRequiredArgs(d.RequiredArgs(), args)
 }
 
 func (d *deleteDataAllFunc) ExecutionProgress() (crv1alpha1.PhaseProgress, error) {

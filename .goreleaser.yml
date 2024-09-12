@@ -2,15 +2,19 @@ project_name: kanister
 before:
   hooks:
   - go mod download
+release:
+  prerelease: auto
+  extra_files:
+  - glob: 'helm_package/kanister-operator-*.tgz'
 builds:
 - id: kanctl
   binary: kanctl
   main: cmd/kanctl/main.go
   ldflags: &ldflags
   - -extldflags "-static"
-    -X github.com/kanisterio/kanister/pkg/version.VERSION={{.Version}}
-    -X github.com/kanisterio/kanister/pkg/version.GIT_COMMIT={{.Commit}}
-    -X github.com/kanisterio/kanister/pkg/version.BUILD_DATE={{.Date}}
+    -X github.com/kanisterio/kanister/pkg/version.Version={{.Version}}
+    -X github.com/kanisterio/kanister/pkg/version.GitCommit={{.Commit}}
+    -X github.com/kanisterio/kanister/pkg/version.BuildDate={{.Date}}
   env: &env
   - GO111MODULE=on
   - CGO_ENABLED=1
@@ -52,84 +56,33 @@ dockers:
   image_templates:
   - 'ghcr.io/kanisterio/controller:{{ .Tag }}'
   dockerfile: 'docker/controller/Dockerfile'
+  build_flag_templates:
+  - "--pull"
 - ids:
   - repo-server-controller
   image_templates:
   - 'ghcr.io/kanisterio/repo-server-controller:{{ .Tag }}'
   dockerfile: 'docker/repo-server-controller/Dockerfile'
+  build_flag_templates:
+  - "--pull"
 - ids:
   - kando
   image_templates:
   - 'ghcr.io/kanisterio/kanister-tools:{{ .Tag }}'
   dockerfile: 'docker/tools/Dockerfile'
   build_flag_templates:
+  - "--pull"
   - "--build-arg=kan_tools_version={{ .Tag }}"
-# Refers to https://github.com/kopia/kopia/commit/fc640a98e4914e1da9fff6be1931ebfd767d3ee3
-  - "--build-arg=kopia_build_commit=fc640a9"
+# Refers to https://github.com/kopia/kopia/commit/951f126b3c5e7ed4b266db2b597ebb018eb11088
+  - "--build-arg=kopia_build_commit=951f126"
   - "--build-arg=kopia_repo_org=kopia"
   extra_files:
   - 'LICENSE'
-- ids:
-  - kando
-  image_templates:
-  - 'ghcr.io/kanisterio/postgres-kanister-tools:{{ .Tag }}'
-  dockerfile: 'docker/postgres-kanister-tools/Dockerfile'
-  build_flag_templates:
-  - "--build-arg=TOOLS_IMAGE=ghcr.io/kanisterio/kanister-tools:{{ .Tag }}"
-- image_templates:
-  - 'ghcr.io/kanisterio/postgresql:{{ .Tag }}'
-  dockerfile: 'docker/postgresql/Dockerfile'
-- ids:
-  - kando
-  image_templates:
-  - 'ghcr.io/kanisterio/es-sidecar:{{ .Tag }}'
-  dockerfile: 'docker/kanister-elasticsearch/image/Dockerfile'
-  build_flag_templates:
-  - "--build-arg=TOOLS_IMAGE=ghcr.io/kanisterio/kanister-tools:{{ .Tag }}"
-- ids:
-  - kando
-  image_templates:
-  - 'ghcr.io/kanisterio/mysql-sidecar:{{ .Tag }}'
-  dockerfile: 'docker/kanister-mysql/image/Dockerfile'
-  build_flag_templates:
-  - "--build-arg=TOOLS_IMAGE=ghcr.io/kanisterio/kanister-tools:{{ .Tag }}"
 - image_templates:
   - 'ghcr.io/kanisterio/kanister-kubectl-1.18:{{ .Tag }}'
   dockerfile: 'docker/kanister-kubectl/Dockerfile'
   build_flag_templates:
   - "--build-arg=TOOLS_IMAGE=ghcr.io/kanisterio/kanister-tools:{{ .Tag }}"
-- ids:
-  - kando
-  image_templates:
-  - 'ghcr.io/kanisterio/mongodb:{{ .Tag }}'
-  dockerfile: 'docker/mongodb/Dockerfile'
-  build_flag_templates:
-  - "--build-arg=TOOLS_IMAGE=ghcr.io/kanisterio/kanister-tools:{{ .Tag }}"
-- ids:
-  - kando
-  image_templates:
-  - 'ghcr.io/kanisterio/cassandra:{{ .Tag }}'
-  dockerfile: 'docker/cassandra/Dockerfile'
-  build_flag_templates:
-  - "--build-arg=TOOLS_IMAGE=ghcr.io/kanisterio/kanister-tools:{{ .Tag }}"
-- image_templates:
-  - 'ghcr.io/kanisterio/kafka-adobe-s3-source-connector:{{ .Tag }}'
-  dockerfile: 'docker/kafka-adobes3Connector/image/adobeSource.Dockerfile'
-  extra_files:
-  - 'docker/kafka-adobes3Connector/image/adobe-monitorsource.sh'
-  - 'docker/kafka-adobes3Connector/image/cleans3.py'
-- ids:
-  - kando
-  image_templates:
-  - 'ghcr.io/kanisterio/kafka-adobe-s3-sink-connector:{{ .Tag }}'
-  dockerfile: 'docker/kafka-adobes3Connector/image/adobeSink.Dockerfile'
-  extra_files:
-  - 'docker/kafka-adobes3Connector/image/adobe-monitorsink.sh'
-- ids:
-    - kando
-  image_templates:
-    - 'ghcr.io/kanisterio/mssql-tools:{{ .Tag }}'
-  dockerfile: 'docker/mssql-tools/Dockerfile'
 snapshot:
   name_template: '{{ .Tag }}'
 checksum:
@@ -140,5 +93,6 @@ changelog:
     exclude:
     - '^docs:'
     - '^test:'
+    - '^pre-release:'
 archives:
   - allow_different_binary_count: true

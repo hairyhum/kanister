@@ -19,6 +19,7 @@ import (
 	"os"
 	"strings"
 
+	osversioned "github.com/openshift/client-go/apps/clientset/versioned"
 	"golang.org/x/oauth2/google"
 	"google.golang.org/api/compute/v1"
 	. "gopkg.in/check.v1"
@@ -39,7 +40,6 @@ import (
 	"github.com/kanisterio/kanister/pkg/param"
 	"github.com/kanisterio/kanister/pkg/resource"
 	"github.com/kanisterio/kanister/pkg/testutil"
-	osversioned "github.com/openshift/client-go/apps/clientset/versioned"
 )
 
 const (
@@ -296,7 +296,7 @@ func newStatefulSet(namespace string) *appsv1.StatefulSet {
 					},
 					Spec: corev1.PersistentVolumeClaimSpec{
 						AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
-						Resources: corev1.ResourceRequirements{
+						Resources: corev1.VolumeResourceRequirements{
 							Requests: corev1.ResourceList{
 								corev1.ResourceName(corev1.ResourceStorage): k8sresource.MustParse("1Gi"),
 							},

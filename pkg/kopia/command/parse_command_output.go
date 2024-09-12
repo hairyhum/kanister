@@ -23,10 +23,10 @@ import (
 	"strings"
 
 	"github.com/dustin/go-humanize"
+	"github.com/kanisterio/errkit"
 	"github.com/kopia/kopia/repo/manifest"
 	"github.com/kopia/kopia/snapshot"
 	"github.com/kopia/kopia/snapshot/policy"
-	"github.com/pkg/errors"
 
 	"github.com/kanisterio/kanister/pkg/field"
 	"github.com/kanisterio/kanister/pkg/log"
@@ -39,6 +39,7 @@ const (
 
 	//nolint:lll
 	snapshotCreateOutputRegEx       = `(?P<spinner>[|/\-\\\*]).+[^\d](?P<numHashed>\d+) hashed \((?P<hashedSize>[^\)]+)\), (?P<numCached>\d+) cached \((?P<cachedSize>[^\)]+)\), uploaded (?P<uploadedSize>[^\)]+), (?:estimating...|estimated (?P<estimatedSize>[^\)]+) \((?P<estimatedProgress>[^\)]+)\%\).+)`
+	restoreOutputRegEx              = `Processed (?P<processedCount>\d+) \((?P<processedSize>.*)\) of (?P<totalCount>\d+) \((?P<totalSize>.*)\) (?P<dataRate>.*) \((?P<percentage>.*)%\) remaining (?P<remainingTime>.*)\.`
 	extractSnapshotIDRegEx          = `Created snapshot with root ([^\s]+) and ID ([^\s]+).*$`
 	repoTotalSizeFromBlobStatsRegEx = `Total: (\d+)$`
 	repoCountFromBlobStatsRegEx     = `Count: (\d+)$`
@@ -47,7 +48,7 @@ const (
 // SnapshotIDsFromSnapshot extracts root ID of a snapshot from the logs
 func SnapshotIDsFromSnapshot(output string) (snapID, rootID string, err error) {
 	if output == "" {
-		return snapID, rootID, errors.New("Received empty output")
+		return snapID, rootID, errkit.New("Received empty output")
 	}
 
 	logs := regexp.MustCompile("[\r\n]").Split(output, -1)
@@ -61,7 +62,7 @@ func SnapshotIDsFromSnapshot(output string) (snapID, rootID string, err error) {
 			return snapID, rootID, nil
 		}
 	}
-	return snapID, rootID, errors.New("Failed to find Root ID from output")
+	return snapID, rootID, errkit.New("Failed to find Root ID from output")
 }
 
 // LatestSnapshotInfoFromManifestList returns snapshot ID and backup path of the latest snapshot from `manifests list` output
@@ -72,7 +73,7 @@ func LatestSnapshotInfoFromManifestList(output string) (string, string, error) {
 
 	err := json.Unmarshal([]byte(output), &manifestList)
 	if err != nil {
-		return snapID, backupPath, errors.Wrap(err, "Failed to unmarshal manifest list")
+		return snapID, backupPath, errkit.Wrap(err, "Failed to unmarshal manifest list")
 	}
 	for _, manifest := range manifestList {
 		for key, value := range manifest.Labels {
@@ -85,10 +86,10 @@ func LatestSnapshotInfoFromManifestList(output string) (string, string, error) {
 		}
 	}
 	if snapID == "" {
-		return "", "", errors.New("Failed to get latest snapshot ID from manifest list")
+		return "", "", errkit.New("Failed to get latest snapshot ID from manifest list")
 	}
 	if backupPath == "" {
-		return "", "", errors.New("Failed to get latest snapshot backup path from manifest list")
+		return "", "", errkit.New("Failed to get latest snapshot backup path from manifest list")
 	}
 	return snapID, backupPath, nil
 }
@@ -108,15 +109,15 @@ func SnapshotInfoFromSnapshotCreateOutput(output string) (string, string, error)
 		if snapManifest.RootEntry != nil {
 			rootID = snapManifest.RootEntry.ObjectID.String()
 			if snapManifest.RootEntry.DirSummary != nil && snapManifest.RootEntry.DirSummary.FatalErrorCount > 0 {
-				return "", "", errors.New(fmt.Sprintf("Error occurred during snapshot creation. Output %s", output))
+				return "", "", errkit.New(fmt.Sprintf("Error occurred during snapshot creation. Output %s", output))
 			}
 		}
 	}
 	if snapID == "" {
-		return "", "", errors.New(fmt.Sprintf("Failed to get snapshot ID from create snapshot output %s", output))
+		return "", "", errkit.New(fmt.Sprintf("Failed to get snapshot ID from create snapshot output %s", output))
 	}
 	if rootID == "" {
-		return "", "", errors.New(fmt.Sprintf("Failed to get root ID from create snapshot output %s", output))
+		return "", "", errkit.New(fmt.Sprintf("Failed to get root ID from create snapshot output %s", output))
 	}
 	return snapID, rootID, nil
 }
@@ -125,12 +126,12 @@ func SnapshotInfoFromSnapshotCreateOutput(output string) (string, string, error)
 // is formatted as the output of a kopia snapshot list --all command.
 func SnapSizeStatsFromSnapListAll(output string) (totalSizeB int64, numSnapshots int, err error) {
 	if output == "" {
-		return 0, 0, errors.New("Received empty output")
+		return 0, 0, errkit.New("Received empty output")
 	}
 
 	snapList, err := ParseSnapshotManifestList(output)
 	if err != nil {
-		return 0, 0, errors.Wrap(err, "Parsing snapshot list output as snapshot manifest list")
+		return 0, 0, errkit.Wrap(err, "Parsing snapshot list output as snapshot manifest list")
 	}
 
 	totalSizeB = sumSnapshotSizes(snapList)
@@ -162,7 +163,7 @@ func ParseSnapshotManifestList(output string) ([]*snapshot.Manifest, error) {
 	snapInfoList := []*snapshot.Manifest{}
 
 	if err := json.Unmarshal([]byte(output), &snapInfoList); err != nil {
-		return nil, errors.Wrap(err, "Failed to unmarshal snapshot manifest list")
+		return nil, errkit.Wrap(err, "Failed to unmarshal snapshot manifest list")
 	}
 
 	return snapInfoList, nil
@@ -205,11 +206,19 @@ type SnapshotCreateStats struct {
 	ProgressPercent int64
 }
 
-var kopiaProgressPattern = regexp.MustCompile(snapshotCreateOutputRegEx) //nolint:lll
+var (
+	kopiaProgressPattern = regexp.MustCompile(snapshotCreateOutputRegEx)
+	kopiaRestorePattern  = regexp.MustCompile(restoreOutputRegEx)
+)
 
-// SnapshotStatsFromSnapshotCreate parses the output of a kopia snapshot
-// create execution for a log of the stats for that execution.
-func SnapshotStatsFromSnapshotCreate(snapCreateStderrOutput string, matchOnlyFinished bool) (stats *SnapshotCreateStats) {
+// SnapshotStatsFromSnapshotCreate parses the output of a `kopia snapshot
+// create` line-by-line in search of progress statistics.
+// It returns nil if no statistics are found, or the most recent statistic
+// if multiple are encountered.
+func SnapshotStatsFromSnapshotCreate(
+	snapCreateStderrOutput string,
+	matchOnlyFinished bool,
+) (stats *SnapshotCreateStats) {
 	if snapCreateStderrOutput == "" {
 		return nil
 	}
@@ -327,12 +336,106 @@ func parseKopiaProgressLine(line string, matchOnlyFinished bool) (stats *Snapsho
 	}
 }
 
+// RestoreStats is a container for stats parsed from the output of a
+// `kopia restore` command.
+type RestoreStats struct {
+	FilesProcessed  int64
+	SizeProcessedB  int64
+	FilesTotal      int64
+	SizeTotalB      int64
+	ProgressPercent int64
+}
+
+// RestoreStatsFromRestoreOutput parses the output of a `kopia restore`
+// line-by-line in search of progress statistics.
+// It returns nil if no statistics are found, or the most recent statistic
+// if multiple are encountered.
+func RestoreStatsFromRestoreOutput(
+	restoreStderrOutput string,
+) (stats *RestoreStats) {
+	if restoreStderrOutput == "" {
+		return nil
+	}
+	logs := regexp.MustCompile("[\r\n]").Split(restoreStderrOutput, -1)
+
+	for _, l := range logs {
+		lineStats := parseKopiaRestoreProgressLine(l)
+		if lineStats != nil {
+			stats = lineStats
+		}
+	}
+
+	return stats
+}
+
+// parseKopiaRestoreProgressLine parses restore stats from the output log line,
+// which is expected to be in the following format:
+// Processed 5 (1.4 GB) of 5 (1.8 GB) 291.1 MB/s (75.2%) remaining 1s.
+func parseKopiaRestoreProgressLine(line string) (stats *RestoreStats) {
+	match := kopiaRestorePattern.FindStringSubmatch(line)
+	if len(match) < 8 {
+		return nil
+	}
+
+	groups := make(map[string]string)
+	for i, name := range kopiaRestorePattern.SubexpNames() {
+		if i != 0 && name != "" {
+			groups[name] = match[i]
+		}
+	}
+
+	processedCount, err := strconv.Atoi(groups["processedCount"])
+	if err != nil {
+		log.WithError(err).Print("Skipping entry due to inability to parse number of processed files", field.M{"processedCount": groups["processedCount"]})
+		return nil
+	}
+
+	processedSize, err := humanize.ParseBytes(groups["processedSize"])
+	if err != nil {
+		log.WithError(err).Print("Skipping entry due to inability to parse amount of processed bytes", field.M{"processedSize": groups["processedSize"]})
+		return nil
+	}
+
+	totalCount, err := strconv.Atoi(groups["totalCount"])
+	if err != nil {
+		log.WithError(err).Print("Skipping entry due to inability to parse expected number of files", field.M{"totalCount": groups["totalCount"]})
+		return nil
+	}
+
+	totalSize, err := humanize.ParseBytes(groups["totalSize"])
+	if err != nil {
+		log.WithError(err).Print("Skipping entry due to inability to parse expected amount of bytes", field.M{"totalSize": groups["totalSize"]})
+		return nil
+	}
+
+	progressPercent, err := strconv.ParseFloat(groups["percentage"], 64)
+	if err != nil {
+		log.WithError(err).Print("Skipping entry due to inability to parse progress percent string", field.M{"progressPercent": groups["progressPercent"]})
+		return nil
+	}
+
+	if progressPercent >= 100 {
+		// It may happen that kopia reports progress of 100 or higher without actually
+		// completing the task. This can occur due to inaccurate estimation.
+		// In such cases, we will return the progress as 99% to avoid confusion.
+		progressPercent = 99
+	}
+
+	return &RestoreStats{
+		FilesProcessed:  int64(processedCount),
+		SizeProcessedB:  int64(processedSize),
+		FilesTotal:      int64(totalCount),
+		SizeTotalB:      int64(totalSize),
+		ProgressPercent: int64(progressPercent),
+	}
+}
+
 // RepoSizeStatsFromBlobStatsRaw takes a string as input, interprets it as a kopia blob stats
 // output in an expected format (Contains the line "Total: <size>"), and returns the integer
 // size in bytes or an error if parsing is unsuccessful.
 func RepoSizeStatsFromBlobStatsRaw(blobStats string) (phySizeTotal int64, blobCount int, err error) {
 	if blobStats == "" {
-		return phySizeTotal, blobCount, errors.New("received empty blob stats string")
+		return phySizeTotal, blobCount, errkit.New("received empty blob stats string")
 	}
 
 	sizePattern := regexp.MustCompile(repoTotalSizeFromBlobStatsRegEx)
@@ -362,21 +465,21 @@ func RepoSizeStatsFromBlobStatsRaw(blobStats string) (phySizeTotal int64, blobCo
 	}
 
 	if countStr == "" {
-		return phySizeTotal, blobCount, errors.New("could not find count field in the blob stats")
+		return phySizeTotal, blobCount, errkit.New("could not find count field in the blob stats")
 	}
 
 	if sizeStr == "" {
-		return phySizeTotal, blobCount, errors.New("could not find size field in the blob stats")
+		return phySizeTotal, blobCount, errkit.New("could not find size field in the blob stats")
 	}
 
 	countVal, err := strconv.Atoi(countStr)
 	if err != nil {
-		return phySizeTotal, blobCount, errors.Wrap(err, fmt.Sprintf("unable to convert parsed count value %s", countStr))
+		return phySizeTotal, blobCount, errkit.Wrap(err, fmt.Sprintf("unable to convert parsed count value %s", countStr))
 	}
 
 	sizeValBytes, err := strconv.Atoi(sizeStr)
 	if err != nil {
-		return phySizeTotal, blobCount, errors.Wrap(err, fmt.Sprintf("unable to convert parsed size value %s", countStr))
+		return phySizeTotal, blobCount, errkit.Wrap(err, fmt.Sprintf("unable to convert parsed size value %s", countStr))
 	}
 
 	return int64(sizeValBytes), countVal, nil
@@ -398,7 +501,7 @@ func IsEqualSnapshotCreateStats(a, b *SnapshotCreateStats) bool {
 var ANSIEscapeCode = regexp.MustCompile(`\x1b[^m]*?m`)
 var kopiaErrorPattern = regexp.MustCompile(`(?:ERROR\s+|.*\<ERROR\>\s*|error\s+)(.*)`)
 
-// ErrorFromOutput parses the output of a kopia and returns an error, if found
+// ErrorsFromOutput parses the output of a kopia and returns an error, if found
 func ErrorsFromOutput(output string) []error {
 	if output == "" {
 		return nil
@@ -411,7 +514,7 @@ func ErrorsFromOutput(output string) []error {
 		clean := ANSIEscapeCode.ReplaceAllString(l, "") // Strip all ANSI escape codes from line
 		match := kopiaErrorPattern.FindAllStringSubmatch(clean, 1)
 		if len(match) > 0 {
-			err = append(err, errors.New(match[0][1]))
+			err = append(err, errkit.New(match[0][1]))
 		}
 	}
 
@@ -423,7 +526,7 @@ func ParsePolicyShow(output string) (policy.Policy, error) {
 	policy := policy.Policy{}
 
 	if err := json.Unmarshal([]byte(output), &policy); err != nil {
-		return policy, errors.Wrap(err, "Failed to unmarshal snapshot manifest list")
+		return policy, errkit.Wrap(err, "Failed to unmarshal snapshot manifest list")
 	}
 
 	return policy, nil

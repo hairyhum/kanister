@@ -29,6 +29,7 @@ import (
 	"github.com/kanisterio/kanister/pkg/kube"
 	"github.com/kanisterio/kanister/pkg/param"
 	"github.com/kanisterio/kanister/pkg/progress"
+	"github.com/kanisterio/kanister/pkg/utils"
 )
 
 func init() {
@@ -102,6 +103,14 @@ func (*kubeExecAllFunc) Arguments() []string {
 	}
 }
 
+func (k *kubeExecAllFunc) Validate(args map[string]any) error {
+	if err := utils.CheckSupportedArgs(k.Arguments(), args); err != nil {
+		return err
+	}
+
+	return utils.CheckRequiredArgs(k.RequiredArgs(), args)
+}
+
 func (k *kubeExecAllFunc) ExecutionProgress() (crv1alpha1.PhaseProgress, error) {
 	metav1Time := metav1.NewTime(time.Now())
 	return crv1alpha1.PhaseProgress{
@@ -118,7 +127,7 @@ func execAll(ctx context.Context, cli kubernetes.Interface, namespace string, ps
 	for _, p := range ps {
 		for _, c := range cs {
 			go func(p string, c string) {
-				stdout, stderr, err := kube.Exec(cli, namespace, p, c, cmd, nil)
+				stdout, stderr, err := kube.Exec(ctx, cli, namespace, p, c, cmd, nil)
 				format.LogWithCtx(ctx, p, c, stdout)
 				format.LogWithCtx(ctx, p, c, stderr)
 				errChan <- err

@@ -36,6 +36,8 @@ import (
 	"k8s.io/client-go/kubernetes"
 	k8sscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
+	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	crv1alpha1 "github.com/kanisterio/kanister/pkg/apis/cr/v1alpha1"
 	crclientv1alpha1 "github.com/kanisterio/kanister/pkg/client/clientset/versioned/typed/cr/v1alpha1"
@@ -45,7 +47,6 @@ import (
 	"github.com/kanisterio/kanister/pkg/resource"
 	"github.com/kanisterio/kanister/pkg/secrets"
 	"github.com/kanisterio/kanister/pkg/secrets/repositoryserver"
-	reposerver "github.com/kanisterio/kanister/pkg/secrets/repositoryserver"
 	"github.com/kanisterio/kanister/pkg/testutil"
 )
 
@@ -114,16 +115,17 @@ func (s *RepoServerControllerSuite) SetUpSuite(c *C) {
 	c.Assert(err, IsNil)
 
 	s.repoServerControllerNamespace = cns.Name
-
+	ws := webhook.NewServer(webhook.Options{Port: 9443})
 	// Since we are not creating the controller in a pod
 	// the repository server controller needs few env variables set explicitly
-	os.Setenv("POD_NAMESPACE", s.repoServerControllerNamespace)
+	err = os.Setenv("POD_NAMESPACE", s.repoServerControllerNamespace)
+	c.Assert(err, IsNil)
 
 	mgr, err := ctrl.NewManager(config, ctrl.Options{
-		Scheme:             scheme,
-		Port:               9443,
-		MetricsBindAddress: "0",
-		LeaderElection:     false,
+		Scheme:         scheme,
+		WebhookServer:  ws,
+		Metrics:        server.Options{BindAddress: "0"},
+		LeaderElection: false,
 	})
 	c.Assert(err, IsNil)
 
@@ -146,10 +148,13 @@ func (s *RepoServerControllerSuite) SetUpSuite(c *C) {
 	go func(ctx context.Context) {
 		// Env setup required to start the controller service
 		// We need to set this up since we are not creating controller in a pod
-		os.Setenv("HOSTNAME", controllerPodName)
-		os.Setenv("POD_SERVICE_ACCOUNT", defaultServiceAccount)
+		err := os.Setenv("HOSTNAME", controllerPodName)
+		c.Assert(err, IsNil)
+		err = os.Setenv("POD_SERVICE_ACCOUNT", defaultServiceAccount)
+		c.Assert(err, IsNil)
 		// Set KANISTER_TOOLS env to override and use dev image
-		os.Setenv(consts.KanisterToolsImageEnvName, consts.LatestKanisterToolsImage)
+		err = os.Setenv(consts.KanisterToolsImageEnvName, consts.LatestKanisterToolsImage)
+		c.Assert(err, IsNil)
 		err = mgr.Start(ctx)
 		c.Assert(err, IsNil)
 	}(ctx)
@@ -184,7 +189,7 @@ func (s *RepoServerControllerSuite) createRepositoryServerSecrets(c *C) {
 }
 
 func (s *RepoServerControllerSuite) CreateRepositoryServerAdminSecret(data map[string][]byte) (se *corev1.Secret, err error) {
-	return testutil.CreateSecret(s.kubeCli, s.repoServerControllerNamespace, "test-repository-server-admin-", reposerver.AdminCredentialsSecret, data)
+	return testutil.CreateSecret(s.kubeCli, s.repoServerControllerNamespace, "test-repository-server-admin-", repositoryserver.AdminCredentialsSecret, data)
 }
 
 func (s *RepoServerControllerSuite) CreateRepositoryServerUserAccessSecret(data map[string][]byte) (se *corev1.Secret, err error) {
@@ -192,7 +197,7 @@ func (s *RepoServerControllerSuite) CreateRepositoryServerUserAccessSecret(data 
 }
 
 func (s *RepoServerControllerSuite) CreateRepositoryPasswordSecret(data map[string][]byte) (se *corev1.Secret, err error) {
-	return testutil.CreateSecret(s.kubeCli, s.repoServerControllerNamespace, "test-repository-password-", reposerver.RepositoryPasswordSecret, data)
+	return testutil.CreateSecret(s.kubeCli, s.repoServerControllerNamespace, "test-repository-password-", repositoryserver.RepositoryPasswordSecret, data)
 }
 
 func (s *RepoServerControllerSuite) CreateKopiaTLSSecret(data map[string][]byte) (se *corev1.Secret, err error) {
@@ -200,7 +205,7 @@ func (s *RepoServerControllerSuite) CreateKopiaTLSSecret(data map[string][]byte)
 }
 
 func (s *RepoServerControllerSuite) CreateStorageLocationSecret(data map[string][]byte) (se *corev1.Secret, err error) {
-	return testutil.CreateSecret(s.kubeCli, s.repoServerControllerNamespace, "test-repository-server-storage-", reposerver.Location, data)
+	return testutil.CreateSecret(s.kubeCli, s.repoServerControllerNamespace, "test-repository-server-storage-", repositoryserver.Location, data)
 }
 
 func (s *RepoServerControllerSuite) CreateAWSStorageCredentialsSecret(data map[string][]byte) (se *corev1.Secret, err error) {
@@ -271,7 +276,7 @@ func (s *RepoServerControllerSuite) TestRepositoryServerStatusIsServerReady(c *C
 	err = kube.WaitForPodReady(ctx, s.kubeCli, s.repoServerControllerNamespace, repoServerCRCreated.Status.ServerInfo.PodName)
 	c.Assert(err, IsNil)
 
-	err = testutil.CreateTestKopiaRepository(s.kubeCli, repoServerCRCreated, testutil.GetDefaultS3CompliantStorageLocation())
+	err = testutil.CreateTestKopiaRepository(ctx, s.kubeCli, repoServerCRCreated, testutil.GetDefaultS3CompliantStorageLocation())
 	c.Assert(err, IsNil)
 
 	_, err = s.waitOnRepositoryServerState(c, repoServerCRCreated.Name)
@@ -412,7 +417,7 @@ func (s *RepoServerControllerSuite) TestFilestoreLocationVolumeMountOnRepoServer
 		},
 		Spec: corev1.PersistentVolumeClaimSpec{
 			AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
-			Resources: corev1.ResourceRequirements{
+			Resources: corev1.VolumeResourceRequirements{
 				Requests: corev1.ResourceList{
 					corev1.ResourceName(corev1.ResourceStorage): k8sresource.MustParse("1Gi"),
 				},
@@ -482,7 +487,7 @@ func (s *RepoServerControllerSuite) waitForRepoServerInfoUpdateInCR(repoServerNa
 }
 
 func (s *RepoServerControllerSuite) waitOnRepositoryServerState(c *C, reposerverName string) (crv1alpha1.RepositoryServerProgress, error) {
-	ctxTimeout := 5 * time.Minute
+	ctxTimeout := 10 * time.Minute
 	ctx, cancel := context.WithTimeout(context.Background(), ctxTimeout)
 	defer cancel()
 	var repoServerState crv1alpha1.RepositoryServerProgress

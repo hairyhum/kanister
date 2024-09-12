@@ -30,6 +30,7 @@ import (
 	"github.com/kanisterio/kanister/pkg/param"
 	"github.com/kanisterio/kanister/pkg/progress"
 	"github.com/kanisterio/kanister/pkg/restic"
+	"github.com/kanisterio/kanister/pkg/utils"
 )
 
 const (
@@ -68,24 +69,28 @@ func (*restoreDataAllFunc) Name() string {
 	return RestoreDataAllFuncName
 }
 
-func validateAndGetRestoreAllOptArgs(args map[string]interface{}, tp param.TemplateParams) (string, string, []string, crv1alpha1.JSONMap, error) {
+func validateAndGetRestoreAllOptArgs(args map[string]interface{}, tp param.TemplateParams) (string, string, []string, bool, crv1alpha1.JSONMap, error) {
 	var restorePath, encryptionKey, pods string
 	var ps []string
 	var podOverride crv1alpha1.JSONMap
 	var err error
+	var insecureTLS bool
 
 	if err = OptArg(args, RestoreDataAllRestorePathArg, &restorePath, "/"); err != nil {
-		return restorePath, encryptionKey, ps, podOverride, err
+		return restorePath, encryptionKey, ps, insecureTLS, podOverride, err
 	}
 	if err = OptArg(args, RestoreDataAllEncryptionKeyArg, &encryptionKey, restic.GeneratePassword()); err != nil {
-		return restorePath, encryptionKey, ps, podOverride, err
+		return restorePath, encryptionKey, ps, insecureTLS, podOverride, err
 	}
 	if err = OptArg(args, RestoreDataAllPodsArg, &pods, ""); err != nil {
-		return restorePath, encryptionKey, ps, podOverride, err
+		return restorePath, encryptionKey, ps, insecureTLS, podOverride, err
+	}
+	if err = OptArg(args, InsecureTLS, &insecureTLS, false); err != nil {
+		return restorePath, encryptionKey, ps, insecureTLS, podOverride, err
 	}
 	podOverride, err = GetPodSpecOverride(tp, args, RestoreDataAllPodOverrideArg)
 	if err != nil {
-		return restorePath, encryptionKey, ps, podOverride, err
+		return restorePath, encryptionKey, ps, insecureTLS, podOverride, err
 	}
 
 	if pods != "" {
@@ -97,11 +102,11 @@ func validateAndGetRestoreAllOptArgs(args map[string]interface{}, tp param.Templ
 		case tp.StatefulSet != nil:
 			ps = tp.StatefulSet.Pods
 		default:
-			return restorePath, encryptionKey, ps, podOverride, errors.New("Unsupported workload type")
+			return restorePath, encryptionKey, ps, insecureTLS, podOverride, errors.New("Unsupported workload type")
 		}
 	}
 
-	return restorePath, encryptionKey, ps, podOverride, nil
+	return restorePath, encryptionKey, ps, insecureTLS, podOverride, err
 }
 
 func (r *restoreDataAllFunc) Exec(ctx context.Context, tp param.TemplateParams, args map[string]interface{}) (map[string]interface{}, error) {
@@ -111,6 +116,8 @@ func (r *restoreDataAllFunc) Exec(ctx context.Context, tp param.TemplateParams, 
 
 	var namespace, image, backupArtifactPrefix, backupInfo string
 	var err error
+	var bpAnnotations, bpLabels map[string]string
+
 	if err = Arg(args, RestoreDataAllNamespaceArg, &namespace); err != nil {
 		return nil, err
 	}
@@ -123,9 +130,29 @@ func (r *restoreDataAllFunc) Exec(ctx context.Context, tp param.TemplateParams, 
 	if err = Arg(args, RestoreDataAllBackupInfo, &backupInfo); err != nil {
 		return nil, err
 	}
+	if err = OptArg(args, PodAnnotationsArg, &bpAnnotations, nil); err != nil {
+		return nil, err
+	}
+	if err = OptArg(args, PodLabelsArg, &bpLabels, nil); err != nil {
+		return nil, err
+	}
+
+	annotations := bpAnnotations
+	labels := bpLabels
+	if tp.PodAnnotations != nil {
+		// merge the actionset annotations with blueprint annotations
+		var actionSetAnn ActionSetAnnotations = tp.PodAnnotations
+		annotations = actionSetAnn.MergeBPAnnotations(bpAnnotations)
+	}
+
+	if tp.PodLabels != nil {
+		// merge the actionset labels with blueprint labels
+		var actionSetLabels ActionSetLabels = tp.PodLabels
+		labels = actionSetLabels.MergeBPLabels(bpLabels)
+	}
 
 	// Validate and get optional arguments
-	restorePath, encryptionKey, pods, podOverride, err := validateAndGetRestoreAllOptArgs(args, tp)
+	restorePath, encryptionKey, pods, insecureTLS, podOverride, err := validateAndGetRestoreAllOptArgs(args, tp)
 	if err != nil {
 		return nil, err
 	}
@@ -155,7 +182,24 @@ func (r *restoreDataAllFunc) Exec(ctx context.Context, tp param.TemplateParams, 
 				outputChan <- out
 				return
 			}
-			out, err = restoreData(ctx, cli, tp, namespace, encryptionKey, fmt.Sprintf("%s/%s", backupArtifactPrefix, pod), restorePath, "", input[pod].BackupID, restoreDataAllJobPrefix, image, vols, podOverride)
+			out, err = restoreData(
+				ctx,
+				cli,
+				tp,
+				namespace,
+				encryptionKey,
+				fmt.Sprintf("%s/%s", backupArtifactPrefix, pod),
+				restorePath,
+				"",
+				input[pod].BackupID,
+				restoreDataAllJobPrefix,
+				image,
+				insecureTLS,
+				vols,
+				podOverride,
+				annotations,
+				labels,
+			)
 			errChan <- errors.Wrapf(err, "Failed to restore data for pod %s", pod)
 			outputChan <- out
 		}(pod)
@@ -197,7 +241,22 @@ func (*restoreDataAllFunc) Arguments() []string {
 		RestoreDataAllEncryptionKeyArg,
 		RestoreDataAllPodsArg,
 		RestoreDataAllPodOverrideArg,
+		InsecureTLS,
+		PodAnnotationsArg,
+		PodLabelsArg,
 	}
+}
+
+func (r *restoreDataAllFunc) Validate(args map[string]any) error {
+	if err := ValidatePodLabelsAndAnnotations(r.Name(), args); err != nil {
+		return err
+	}
+
+	if err := utils.CheckSupportedArgs(r.Arguments(), args); err != nil {
+		return err
+	}
+
+	return utils.CheckRequiredArgs(r.RequiredArgs(), args)
 }
 
 func (r *restoreDataAllFunc) ExecutionProgress() (crv1alpha1.PhaseProgress, error) {

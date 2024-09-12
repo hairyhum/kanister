@@ -22,7 +22,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pkg/errors"
+	"github.com/kanisterio/errkit"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -43,6 +43,8 @@ const (
 	// NoPVCNameSpecified is used by the caller to indicate that the PVC name
 	// should be auto-generated
 	NoPVCNameSpecified = ""
+
+	RegionZoneSeparator = "__"
 )
 
 // CreatePVC creates a PersistentVolumeClaim and returns its name
@@ -64,7 +66,7 @@ func CreatePVC(
 	size, err := resource.ParseQuantity(sizeFmt)
 	emptyStorageClass := ""
 	if err != nil {
-		return "", errors.Wrapf(err, "Unable to parse sizeFmt %s", sizeFmt)
+		return "", errkit.Wrap(err, "Unable to parse sizeFmt", "sizeFmt", sizeFmt)
 	}
 	if len(accessmodes) == 0 {
 		accessmodes = []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce}
@@ -76,7 +78,7 @@ func CreatePVC(
 		Spec: corev1.PersistentVolumeClaimSpec{
 			AccessModes: accessmodes,
 			VolumeMode:  volumemode,
-			Resources: corev1.ResourceRequirements{
+			Resources: corev1.VolumeResourceRequirements{
 				Requests: corev1.ResourceList{
 					corev1.ResourceName(corev1.ResourceStorage): size,
 				},
@@ -102,7 +104,7 @@ func CreatePVC(
 		if name != "" && apierrors.IsAlreadyExists(err) {
 			return name, nil
 		}
-		return "", errors.Wrapf(err, "Unable to create PVC %v", pvc)
+		return "", errkit.Wrap(err, "Unable to create PVC", "pvc", pvc)
 	}
 	return createdPVC.Name, nil
 }
@@ -135,7 +137,7 @@ type CreatePVCFromSnapshotArgs struct {
 func CreatePVCFromSnapshot(ctx context.Context, args *CreatePVCFromSnapshotArgs) (string, error) {
 	storageSize, err := getPVCRestoreSize(ctx, args)
 	if err != nil {
-		return "", errors.Wrap(err, "Failed to get PVC restore size")
+		return "", errkit.Wrap(err, "Failed to get PVC restore size")
 	}
 
 	if len(args.AccessModes) == 0 {
@@ -165,7 +167,7 @@ func CreatePVCFromSnapshot(ctx context.Context, args *CreatePVCFromSnapshotArgs)
 				Kind:     snapshotKind,
 				Name:     args.SnapshotName,
 			},
-			Resources: corev1.ResourceRequirements{
+			Resources: corev1.VolumeResourceRequirements{
 				Requests: corev1.ResourceList{
 					corev1.ResourceStorage: *storageSize,
 				},
@@ -186,7 +188,7 @@ func CreatePVCFromSnapshot(ctx context.Context, args *CreatePVCFromSnapshotArgs)
 		if args.VolumeName != "" && apierrors.IsAlreadyExists(err) {
 			return args.VolumeName, nil
 		}
-		return "", errors.Wrapf(err, "Unable to create PVC, PVC: %v", pvc)
+		return "", errkit.Wrap(err, "Unable to create PVC", "pvc", pvc)
 	}
 	return pvc.Name, err
 }
@@ -197,25 +199,25 @@ func getPVCRestoreSize(ctx context.Context, args *CreatePVCFromSnapshotArgs) (*r
 	if args.RestoreSize != "" {
 		s, err := resource.ParseQuantity(args.RestoreSize)
 		if err != nil {
-			return nil, fmt.Errorf("Failed to parse quantity (%s)", args.RestoreSize)
+			return nil, errkit.New("Failed to parse quantity", "restoreSize", args.RestoreSize)
 		}
 		quantities = append(quantities, &s)
 	}
 
 	sns, err := snapshot.NewSnapshotter(args.KubeCli, args.DynCli)
 	if err != nil {
-		return nil, errors.Wrap(err, "Failed to get snapshotter")
+		return nil, errkit.Wrap(err, "Failed to get snapshotter")
 	}
 	snap, err := sns.Get(ctx, args.SnapshotName, args.Namespace)
 	if err != nil {
-		return nil, errors.Wrap(err, "Failed to get snapshot")
+		return nil, errkit.Wrap(err, "Failed to get snapshot")
 	}
 	if snap.Status != nil && snap.Status.RestoreSize != nil {
 		quantities = append(quantities, snap.Status.RestoreSize)
 	}
 
 	if len(quantities) == 0 {
-		return nil, fmt.Errorf("Restore size is empty and no restore size argument given, Volumesnapshot: %s", args.SnapshotName)
+		return nil, errkit.New("Restore size is empty and no restore size argument given", "volumeSnapshot", args.SnapshotName)
 	}
 
 	quantity := quantities[0]
@@ -241,7 +243,7 @@ func CreatePV(
 	sizeFmt := fmt.Sprintf("%d", vol.SizeInBytes)
 	size, err := resource.ParseQuantity(sizeFmt)
 	if err != nil {
-		return "", errors.Wrapf(err, "Unable to parse sizeFmt %s", sizeFmt)
+		return "", errkit.Wrap(err, "Unable to parse sizeFmt", "sizeFmt", sizeFmt)
 	}
 	matchLabels := map[string]string{pvMatchLabelName: filepath.Base(vol.ID)}
 
@@ -277,22 +279,22 @@ func CreatePV(
 		pv.Spec.PersistentVolumeSource.AWSElasticBlockStore = &corev1.AWSElasticBlockStoreVolumeSource{
 			VolumeID: vol.ID,
 		}
-		pv.ObjectMeta.Labels[kube.FDZoneLabelName] = vol.Az
-		pv.ObjectMeta.Labels[kube.FDRegionLabelName] = zoneToRegion(vol.Az)
+		pv.ObjectMeta.Labels[kube.TopologyZoneLabelName] = vol.Az
+		pv.ObjectMeta.Labels[kube.TopologyRegionLabelName] = zoneToRegion(vol.Az)
 	case blockstorage.TypeGPD:
 		pv.Spec.PersistentVolumeSource.GCEPersistentDisk = &corev1.GCEPersistentDiskVolumeSource{
 			PDName: vol.ID,
 		}
-		pv.ObjectMeta.Labels[kube.FDZoneLabelName] = vol.Az
-		pv.ObjectMeta.Labels[kube.FDRegionLabelName] = zoneToRegion(vol.Az)
+		pv.ObjectMeta.Labels[kube.TopologyZoneLabelName] = vol.Az
+		pv.ObjectMeta.Labels[kube.TopologyRegionLabelName] = zoneToRegion(vol.Az)
 
 	default:
-		return "", errors.Errorf("Volume type %v(%T) not supported ", volType, volType)
+		return "", errkit.New("Volume type not supported", "volumeType", volType, "type", fmt.Sprintf("%T", volType))
 	}
 
 	createdPV, err := kubeCli.CoreV1().PersistentVolumes().Create(ctx, &pv, metav1.CreateOptions{})
 	if err != nil {
-		return "", errors.Wrapf(err, "Unable to create PV for volume %v", pv)
+		return "", errkit.Wrap(err, "Unable to create PV for volume", "pv", pv)
 	}
 	return createdPV.Name, nil
 }
@@ -336,11 +338,26 @@ func labelSelector(labels map[string]string) string {
 	return strings.Join(ls, ",")
 }
 
-// zoneToRegion removes -latter or just last latter from provided zone.
+// zoneToRegion figures out region from a zone and to do that it
+// just removes `-[onchar]` from the end of zone.
 func zoneToRegion(zone string) string {
-	// TODO: gocritic rule below suggests to use regexp.MustCompile but it
-	// panics if regex cannot be compiled. We should add proper test before
-	// enabling this below so that no change to this regex results in a panic
-	r, _ := regexp.Compile("-?[a-z]$") //nolint:gocritic
-	return r.ReplaceAllString(zone, "")
+	// zone can have multiple zone separate by `__` that's why first call
+	// zonesToRegions to get region for every zone and then return back
+	// by appending every region with `__` separator
+	return strings.Join(zonesToRegions(zone), RegionZoneSeparator)
+}
+
+func zonesToRegions(zone string) []string {
+	reg := map[string]bool{}
+	var regions []string
+	r := regexp.MustCompile("-?[a-z]$")
+	for _, z := range strings.Split(zone, RegionZoneSeparator) {
+		zone = r.ReplaceAllString(z, "")
+		if _, ok := reg[zone]; !ok {
+			reg[zone] = true
+			regions = append(regions, zone)
+		}
+	}
+
+	return regions
 }

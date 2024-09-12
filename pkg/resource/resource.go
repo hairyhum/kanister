@@ -22,7 +22,6 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
-
 	apiextensionsclient "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -38,7 +37,7 @@ const (
 
 // CreateCustomResources creates the given custom resources and waits for them to initialize
 func CreateCustomResources(ctx context.Context, config *rest.Config) error {
-	crCTX, err := newOpKitContext(config)
+	crCTX, err := newOpKitContext(ctx, config)
 	if err != nil {
 		return err
 	}
@@ -50,7 +49,7 @@ func CreateCustomResources(ctx context.Context, config *rest.Config) error {
 	return customresource.CreateCustomResources(*crCTX, resources)
 }
 
-func newOpKitContext(config *rest.Config) (*customresource.Context, error) {
+func newOpKitContext(ctx context.Context, config *rest.Config) (*customresource.Context, error) {
 	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to get k8s client.")
@@ -64,12 +63,13 @@ func newOpKitContext(config *rest.Config) (*customresource.Context, error) {
 		APIExtensionClientset: apiExtClientset,
 		Interval:              500 * time.Millisecond,
 		Timeout:               60 * time.Second,
+		Context:               ctx,
 	}, nil
 }
 
 // CreateRepoServerCustomResource creates the kopia repository server custom resource
 func CreateRepoServerCustomResource(ctx context.Context, config *rest.Config) error {
-	crCTX, err := newOpKitContext(config)
+	crCTX, err := newOpKitContext(ctx, config)
 	if err != nil {
 		return err
 	}

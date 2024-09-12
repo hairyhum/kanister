@@ -20,18 +20,20 @@ import (
 	"io"
 	"time"
 
-	"github.com/kanisterio/kanister/pkg/consts"
-	"github.com/kanisterio/kanister/pkg/field"
 	"github.com/pkg/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 
 	kanister "github.com/kanisterio/kanister/pkg"
 	crv1alpha1 "github.com/kanisterio/kanister/pkg/apis/cr/v1alpha1"
+	"github.com/kanisterio/kanister/pkg/consts"
+	"github.com/kanisterio/kanister/pkg/ephemeral"
+	"github.com/kanisterio/kanister/pkg/field"
 	"github.com/kanisterio/kanister/pkg/format"
 	"github.com/kanisterio/kanister/pkg/kube"
 	"github.com/kanisterio/kanister/pkg/param"
 	"github.com/kanisterio/kanister/pkg/progress"
+	"github.com/kanisterio/kanister/pkg/utils"
 )
 
 const (
@@ -83,7 +85,18 @@ func getVolumes(tp param.TemplateParams) (map[string]string, error) {
 	return vols, nil
 }
 
-func prepareData(ctx context.Context, cli kubernetes.Interface, namespace, serviceAccount, image string, vols map[string]string, podOverride crv1alpha1.JSONMap, command ...string) (map[string]interface{}, error) {
+func prepareData(
+	ctx context.Context,
+	cli kubernetes.Interface,
+	namespace,
+	serviceAccount,
+	image string,
+	vols map[string]string,
+	podOverride crv1alpha1.JSONMap,
+	annotations,
+	labels map[string]string,
+	command ...string,
+) (map[string]interface{}, error) {
 	// Validate volumes
 	validatedVols := make(map[string]kube.VolumeMountOptions)
 	for pvcName, mountPoint := range vols {
@@ -106,7 +119,13 @@ func prepareData(ctx context.Context, cli kubernetes.Interface, namespace, servi
 		Volumes:            validatedVols,
 		ServiceAccountName: serviceAccount,
 		PodOverride:        podOverride,
+		Annotations:        annotations,
+		Labels:             labels,
 	}
+
+	// Apply the registered ephemeral pod changes.
+	ephemeral.PodOptions.Apply(options)
+
 	pr := kube.NewPodRunner(cli, options)
 	podFunc := prepareDataPodFunc(cli)
 	return pr.Run(ctx, podFunc)
@@ -127,7 +146,7 @@ func prepareDataPodFunc(cli kubernetes.Interface) func(ctx context.Context, pc k
 		if err != nil {
 			return nil, errors.Wrapf(err, "Failed to fetch logs from the pod")
 		}
-		defer r.Close()
+		defer r.Close() //nolint:errcheck
 
 		bytes, err := io.ReadAll(r)
 		if err != nil {
@@ -149,6 +168,7 @@ func (p *prepareDataFunc) Exec(ctx context.Context, tp param.TemplateParams, arg
 	var namespace, image, serviceAccount string
 	var command []string
 	var vols map[string]string
+	var bpAnnotations, bpLabels map[string]string
 	var err error
 	if err = Arg(args, PrepareDataNamespaceArg, &namespace); err != nil {
 		return nil, err
@@ -165,9 +185,29 @@ func (p *prepareDataFunc) Exec(ctx context.Context, tp param.TemplateParams, arg
 	if err = OptArg(args, PrepareDataServiceAccount, &serviceAccount, ""); err != nil {
 		return nil, err
 	}
+	if err = OptArg(args, PodAnnotationsArg, &bpAnnotations, nil); err != nil {
+		return nil, err
+	}
+	if err = OptArg(args, PodLabelsArg, &bpLabels, nil); err != nil {
+		return nil, err
+	}
 	podOverride, err := GetPodSpecOverride(tp, args, PrepareDataPodOverrideArg)
 	if err != nil {
 		return nil, err
+	}
+
+	annotations := bpAnnotations
+	labels := bpLabels
+	if tp.PodAnnotations != nil {
+		// merge the actionset annotations with blueprint annotations
+		var actionSetAnn ActionSetAnnotations = tp.PodAnnotations
+		annotations = actionSetAnn.MergeBPAnnotations(bpAnnotations)
+	}
+
+	if tp.PodLabels != nil {
+		// merge the actionset labels with blueprint labels
+		var actionSetLabels ActionSetLabels = tp.PodLabels
+		labels = actionSetLabels.MergeBPLabels(bpLabels)
 	}
 
 	cli, err := kube.NewClient()
@@ -179,7 +219,18 @@ func (p *prepareDataFunc) Exec(ctx context.Context, tp param.TemplateParams, arg
 			return nil, err
 		}
 	}
-	return prepareData(ctx, cli, namespace, serviceAccount, image, vols, podOverride, command...)
+	return prepareData(
+		ctx,
+		cli,
+		namespace,
+		serviceAccount,
+		image,
+		vols,
+		podOverride,
+		annotations,
+		labels,
+		command...,
+	)
 }
 
 func (*prepareDataFunc) RequiredArgs() []string {
@@ -198,7 +249,21 @@ func (*prepareDataFunc) Arguments() []string {
 		PrepareDataVolumes,
 		PrepareDataServiceAccount,
 		PrepareDataPodOverrideArg,
+		PodAnnotationsArg,
+		PodLabelsArg,
 	}
+}
+
+func (p *prepareDataFunc) Validate(args map[string]any) error {
+	if err := ValidatePodLabelsAndAnnotations(p.Name(), args); err != nil {
+		return err
+	}
+
+	if err := utils.CheckSupportedArgs(p.Arguments(), args); err != nil {
+		return err
+	}
+
+	return utils.CheckRequiredArgs(p.RequiredArgs(), args)
 }
 
 func (p *prepareDataFunc) ExecutionProgress() (crv1alpha1.PhaseProgress, error) {

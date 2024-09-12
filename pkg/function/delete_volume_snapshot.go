@@ -34,6 +34,7 @@ import (
 	"github.com/kanisterio/kanister/pkg/log"
 	"github.com/kanisterio/kanister/pkg/param"
 	"github.com/kanisterio/kanister/pkg/progress"
+	"github.com/kanisterio/kanister/pkg/utils"
 )
 
 func init() {
@@ -49,7 +50,6 @@ const (
 	DeleteVolumeSnapshotFuncName     = "DeleteVolumeSnapshot"
 	DeleteVolumeSnapshotNamespaceArg = "namespace"
 	DeleteVolumeSnapshotManifestArg  = "snapshots"
-	SnapshotDoesNotExistError        = "does not exist"
 )
 
 type deleteVolumeSnapshotFunc struct {
@@ -84,7 +84,7 @@ func deleteVolumeSnapshot(ctx context.Context, cli kubernetes.Interface, namespa
 		}
 		snapshot, err := provider.SnapshotGet(ctx, pvcInfo.SnapshotID)
 		if err != nil {
-			if strings.Contains(err.Error(), SnapshotDoesNotExistError) {
+			if strings.Contains(err.Error(), blockstorage.SnapshotDoesNotExistError) {
 				log.WithContext(ctx).Print("Snapshot already deleted", field.M{"SnapshotID": pvcInfo.SnapshotID})
 			} else {
 				return nil, errors.Wrapf(err, "Failed to get Snapshot from Provider")
@@ -131,6 +131,14 @@ func (*deleteVolumeSnapshotFunc) Arguments() []string {
 		DeleteVolumeSnapshotNamespaceArg,
 		DeleteVolumeSnapshotManifestArg,
 	}
+}
+
+func (d *deleteVolumeSnapshotFunc) Validate(args map[string]any) error {
+	if err := utils.CheckSupportedArgs(d.Arguments(), args); err != nil {
+		return err
+	}
+
+	return utils.CheckRequiredArgs(d.RequiredArgs(), args)
 }
 
 func (d *deleteVolumeSnapshotFunc) ExecutionProgress() (crv1alpha1.PhaseProgress, error) {

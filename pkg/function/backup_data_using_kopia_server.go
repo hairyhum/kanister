@@ -83,6 +83,14 @@ func (*backupDataUsingKopiaServerFunc) Arguments() []string {
 	}
 }
 
+func (b *backupDataUsingKopiaServerFunc) Validate(args map[string]any) error {
+	if err := utils.CheckSupportedArgs(b.Arguments(), args); err != nil {
+		return err
+	}
+
+	return utils.CheckRequiredArgs(b.RequiredArgs(), args)
+}
+
 func (b *backupDataUsingKopiaServerFunc) Exec(ctx context.Context, tp param.TemplateParams, args map[string]any) (map[string]any, error) {
 	// Set progress percent
 	b.progressPercent = progress.StartedPercent
@@ -142,6 +150,7 @@ func (b *backupDataUsingKopiaServerFunc) Exec(ctx context.Context, tp param.Temp
 	}
 
 	snapInfo, err := backupDataUsingKopiaServer(
+		ctx,
 		cli,
 		container,
 		hostname,
@@ -182,6 +191,7 @@ func (b *backupDataUsingKopiaServerFunc) ExecutionProgress() (crv1alpha1.PhasePr
 }
 
 func backupDataUsingKopiaServer(
+	ctx context.Context,
 	cli kubernetes.Interface,
 	container,
 	hostname,
@@ -212,7 +222,7 @@ func backupDataUsingKopiaServer(
 		},
 	})
 
-	stdout, stderr, err := kube.Exec(cli, namespace, pod, container, cmd, nil)
+	stdout, stderr, err := kube.Exec(ctx, cli, namespace, pod, container, cmd, nil)
 	format.Log(pod, container, stdout)
 	format.Log(pod, container, stderr)
 	if err != nil {
@@ -234,7 +244,7 @@ func backupDataUsingKopiaServer(
 	if err != nil {
 		return nil, errors.Wrap(err, "Failed to construct snapshot create command")
 	}
-	stdout, stderr, err = kube.Exec(cli, namespace, pod, container, cmd, nil)
+	stdout, stderr, err = kube.Exec(ctx, cli, namespace, pod, container, cmd, nil)
 	format.Log(pod, container, stdout)
 	format.Log(pod, container, stderr)
 

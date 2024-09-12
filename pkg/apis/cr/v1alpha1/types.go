@@ -113,6 +113,12 @@ type ActionSpec struct {
 	// PreferredVersion will be used to select the preferred version of Kanister functions
 	// to be executed for this action
 	PreferredVersion string `json:"preferredVersion"`
+	// PodLabels will be used to configure the labels of the pods that are created
+	// by Kanister functions run by this ActionSet
+	PodLabels map[string]string `json:"podLabels"`
+	// PodAnnotations will be used to configure the annotations of the pods that created
+	// by Kanister functions run by this ActionSet
+	PodAnnotations map[string]string `json:"podAnnotations"`
 }
 
 // ActionSetStatus is the status for the actionset. This should only be updated by the controller.
@@ -153,8 +159,22 @@ type ActionProgress struct {
 	// RunningPhase represents which phase of the action is being run
 	RunningPhase string `json:"runningPhase,omitempty"`
 	// PercentCompleted is computed by assessing the number of completed phases
-	// against the the total number of phases.
+	// against the total number of phases.
 	PercentCompleted string `json:"percentCompleted,omitempty"`
+	// SizeDownloadedB represents the size of data downloaded in Bytes at a given time during action execution.
+	// This field will be empty for actions which do not involve data movement.
+	SizeDownloadedB int64 `json:"sizeDownloadedB,omitempty"`
+	// SizeUploadedB represents the size of data uploaded in Bytes at a given time during action execution.
+	// This field will be empty for actions which do not involve data movement.
+	SizeUploadedB int64 `json:"sizeUploadedB,omitempty"`
+	// EstimatedDownloadSizeB represents the total estimated size of data in Bytes
+	// that will be downloaded during the action execution.
+	// This field will be empty for actions which do not involve data movement.
+	EstimatedDownloadSizeB int64 `json:"estimatedDownloadSizeB,omitempty"`
+	// EstimatedUploadSizeB represents the total estimated size of data in Bytes
+	// that will be uploaded during the phase execution.
+	// This field will be empty for phases which do not involve data movement.
+	EstimatedUploadSizeB int64 `json:"estimatedUploadSizeB,omitempty"`
 	// LastTransitionTime represents the last date time when the progress status
 	// was received.
 	LastTransitionTime *metav1.Time `json:"lastTransitionTime,omitempty"`
@@ -196,15 +216,22 @@ type Phase struct {
 type PhaseProgress struct {
 	// ProgressPercent represents the execution progress in percentage.
 	ProgressPercent string `json:"progressPercent,omitempty"`
+	// SizeDownloadedB represents the size of data downloaded in Bytes at a given time during phase execution.
+	// This field will be empty for phases which do not involve data movement.
+	SizeDownloadedB int64 `json:"sizeDownloadedB,omitempty"`
 	// SizeUploadedB represents the size of data uploaded in Bytes at a given time during phase execution.
 	// This field will be empty for phases which do not involve data movement.
 	SizeUploadedB int64 `json:"sizeUploadedB,omitempty"`
+	// EstimatedDownloadSizeB represents the total estimated size of data in Bytes
+	// that will be downloaded during the phase execution.
+	// This field will be empty for phases which do not involve data movement.
+	EstimatedDownloadSizeB int64 `json:"estimatedDownloadSizeB,omitempty"`
 	// EstimatedUploadSizeB represents the total estimated size of data in Bytes
 	// that will be uploaded during the phase execution.
 	// This field will be empty for phases which do not involve data movement.
-	EstimatedUploadSizeB int64 `json:"estinatedUploadSizeB,omitempty"`
-	// EstimatedTimeSeconds is the estimated time required in seconds to upload the
-	// remaining data estimated with EstimatedUploadSizeB.
+	EstimatedUploadSizeB int64 `json:"estimatedUploadSizeB,omitempty"`
+	// EstimatedTimeSeconds is the estimated time required in seconds to transfer the
+	// remaining data estimated with EstimatedUploadSizeB/EstimatedDownloadSizeB.
 	// This field will be empty for phases which do not involve data movement.
 	EstimatedTimeSeconds int64 `json:"estinatedTimeSeconds,omitempty"`
 	// LastTransitionTime represents the last date time when the progress status
@@ -311,7 +338,6 @@ type Profile struct {
 	SkipSSLVerify bool `json:"skipSSLVerify"`
 }
 
-// LocationType
 type LocationType string
 
 const (
@@ -321,7 +347,6 @@ const (
 	LocationTypeKopia       LocationType = "kopia"
 )
 
-// Location
 type Location struct {
 	// Type specifies the kind of object storage that would be used to upload the
 	// backup objects. Currently supported values are: "GCS", "S3Compliant",
@@ -338,7 +363,6 @@ type Location struct {
 	Region string `json:"region"`
 }
 
-// CredentialType
 type CredentialType string
 
 const (
@@ -347,7 +371,6 @@ const (
 	CredentialTypeKopia   CredentialType = "kopia"
 )
 
-// Credential
 type Credential struct {
 	// Type represents the information about how the credentials are provided for the respective object storage.
 	Type CredentialType `json:"type"`
@@ -359,7 +382,6 @@ type Credential struct {
 	KopiaServerSecret *KopiaServerSecret `json:"kopiaServerSecret,omitempty"`
 }
 
-// KeyPair
 type KeyPair struct {
 	// IDField specifies the corresponding key in the secret where the AWS Key ID value is stored.
 	IDField string `json:"idField"`

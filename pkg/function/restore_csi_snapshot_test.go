@@ -17,8 +17,6 @@ package function
 import (
 	"context"
 
-	"github.com/kanisterio/kanister/pkg/kube/snapshot"
-
 	. "gopkg.in/check.v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -26,6 +24,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	dynfake "k8s.io/client-go/dynamic/fake"
 	"k8s.io/client-go/kubernetes/fake"
+
+	"github.com/kanisterio/kanister/pkg/kube/snapshot"
 )
 
 const (
@@ -94,8 +94,11 @@ func (testSuite *RestoreCSISnapshotTestSuite) TestRestoreCSISnapshot(c *C) {
 
 		originalPVC := getOriginalPVCManifest(testSuite.pvcName, testSuite.storageClass)
 		createPVC(c, testSuite.namespace, originalPVC, fakeCli)
-
-		err = fakeSnapshotter.Create(ctx, testSuite.snapName, testSuite.namespace, testSuite.pvcName, &testSuite.volumeSnapshotClass, false, nil)
+		fakeSnapshotMeta := snapshot.ObjectMeta{
+			Name:      testSuite.snapName,
+			Namespace: testSuite.namespace,
+		}
+		err = fakeSnapshotter.Create(ctx, testSuite.pvcName, &testSuite.volumeSnapshotClass, false, fakeSnapshotMeta)
 		c.Assert(err, IsNil)
 
 		vs, err := fakeSnapshotter.Get(ctx, testSuite.snapName, testSuite.namespace)
@@ -174,7 +177,7 @@ func getOriginalPVCManifest(pvcName, storageClassName string) *corev1.Persistent
 			StorageClassName: &storageClassName,
 			AccessModes:      []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
 			VolumeMode:       &volumeMode,
-			Resources: corev1.ResourceRequirements{
+			Resources: corev1.VolumeResourceRequirements{
 				Requests: corev1.ResourceList{
 					corev1.ResourceStorage: resource.MustParse("1Gi"),
 				},

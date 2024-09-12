@@ -41,6 +41,8 @@ updates:
     open-pull-requests-limit: 3
     schedule:
       interval: daily
+    commit-message:
+      prefix: "deps(github):"
     groups:
       github-actions:
         patterns:
@@ -49,3 +51,50 @@ updates:
       docker:
         patterns:
         - "docker/*"
+
+  # Update pinned pip packages via requiements.txt
+  - package-ecosystem: "pip"
+    schedule: weekly
+    commit-message:
+      prefix: "deps(docker,pip):"
+    directories:
+      - "/docker/build"
+      - "/docker/postgres-kanister-tools"
+      - "/docker/postgresql"
+
+  - package-ecosystem: "docker"
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "deps(docker):"
+    directories:
+      - "/"
+      - "/docker/build"
+      - "/docker/tools"
+      - "/docker/controller"
+      - "/docker/kanister-kubectl"
+      - "/docker/repo-server-controller"
+      - "/docker/postgres-kanister-tools"
+
+  - package-ecosystem: "docker"
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "deps(docker):"
+    directories:
+      - "/docker/cassandra"
+      - "/docker/couchbase-tools"
+      - "/docker/docs-build"
+      - "/docker/foundationdb"
+      - "/docker/kafka-adobes3Connector/image"
+      - "/docker/kanister-elasticsearch/image"
+      - "/docker/kanister-mongodb-replicaset"
+      - "/docker/kanister-mysql"
+      - "/docker/license_extractor"
+      - "/docker/mongodb"
+      - "/docker/mongodb-atlas"
+      - "/docker/mssql-tools"
+      - "/docker/postgresql"
+      - "/docker/redis-tools"
+
+

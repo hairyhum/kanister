@@ -36,6 +36,7 @@ import (
 	"github.com/kanisterio/kanister/pkg/blockstorage/zone"
 	"github.com/kanisterio/kanister/pkg/field"
 	"github.com/kanisterio/kanister/pkg/kube"
+	"github.com/kanisterio/kanister/pkg/kube/volume"
 	"github.com/kanisterio/kanister/pkg/log"
 	"github.com/kanisterio/kanister/pkg/poll"
 )
@@ -186,12 +187,12 @@ func (s *GpdStorage) SnapshotCopyWithArgs(ctx context.Context, from blockstorage
 
 // SnapshotCreate is part of blockstorage.Provider
 func (s *GpdStorage) SnapshotCreate(ctx context.Context, volume blockstorage.Volume, tags map[string]string) (*blockstorage.Snapshot, error) {
-	rbId, uerr := uuid.NewV1()
+	rbID, uerr := uuid.NewV1()
 	if uerr != nil {
 		return nil, errors.Wrap(uerr, "Failed to create UUID")
 	}
 	rb := &compute.Snapshot{
-		Name:   fmt.Sprintf(snapshotNameFmt, rbId.String()),
+		Name:   fmt.Sprintf(snapshotNameFmt, rbID.String()),
 		Labels: blockstorage.SanitizeTags(ktags.GetTags(tags)),
 	}
 	var err error
@@ -258,6 +259,9 @@ func (s *GpdStorage) SnapshotDelete(ctx context.Context, snapshot *blockstorage.
 func (s *GpdStorage) SnapshotGet(ctx context.Context, id string) (*blockstorage.Snapshot, error) {
 	snap, err := s.service.Snapshots.Get(s.project, id).Context(ctx).Do()
 	if err != nil {
+		if isNotFoundError(err) {
+			return nil, errors.Wrap(err, blockstorage.SnapshotDoesNotExistError)
+		}
 		return nil, err
 	}
 	return s.snapshotParse(ctx, snap), nil
@@ -380,12 +384,12 @@ func (s *GpdStorage) VolumeCreateFromSnapshot(ctx context.Context, snapshot bloc
 			tags[tag.Key] = tag.Value
 		}
 	}
-	createDiskId, err := uuid.NewV1()
+	createDiskID, err := uuid.NewV1()
 	if err != nil {
 		return nil, errors.Wrap(err, "Failed to create UUID")
 	}
 	createDisk := &compute.Disk{
-		Name:           fmt.Sprintf(volumeNameFmt, createDiskId.String()),
+		Name:           fmt.Sprintf(volumeNameFmt, createDiskID.String()),
 		SizeGb:         blockstorage.SizeInGi(snapshot.Volume.SizeInBytes),
 		Type:           snapshot.Volume.VolumeType,
 		Labels:         blockstorage.SanitizeTags(ktags.GetTags(tags)),
@@ -409,7 +413,7 @@ func (s *GpdStorage) VolumeCreateFromSnapshot(ctx context.Context, snapshot bloc
 	if err != nil {
 		return nil, err
 	}
-	volZone := strings.Join(zones, "__")
+	volZone := strings.Join(zones, volume.RegionZoneSeparator)
 	// Validates new Zones
 	region, err = getRegionFromZones(volZone)
 	if err != nil {
@@ -627,7 +631,7 @@ func (s *GpdStorage) dynamicRegionToZoneMap(ctx context.Context) (map[string][]s
 }
 
 func isMultiZone(az string) bool {
-	return strings.Contains(az, "__")
+	return strings.Contains(az, volume.RegionZoneSeparator)
 }
 
 // getRegionFromZones function is used from the link below
@@ -666,5 +670,5 @@ func (s *GpdStorage) getSelfLinks(ctx context.Context, zones []string) ([]string
 }
 
 func splitZones(az string) []string {
-	return strings.Split(az, "__")
+	return strings.Split(az, volume.RegionZoneSeparator)
 }

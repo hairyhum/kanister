@@ -17,7 +17,7 @@ package app
 import (
 	"context"
 
-	"github.com/pkg/errors"
+	"github.com/kanisterio/errkit"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -30,7 +30,7 @@ import (
 	"github.com/kanisterio/kanister/pkg/log"
 )
 
-// Integration test app for CSI Snapshot functions
+// TimeLogCSI is integration test app for CSI Snapshot functions.
 type TimeLogCSI struct {
 	cli        kubernetes.Interface
 	namespace  string
@@ -86,7 +86,7 @@ func (tlc *TimeLogCSI) Reset(ctx context.Context) error {
 	removeLogFileCmd := []string{"sh", "-c", "rm /var/log/time.log"}
 	stderr, err := tlc.execCommand(ctx, removeLogFileCmd)
 	if err != nil {
-		return errors.Wrapf(err, "Error while deleting log file: %s", stderr)
+		return errkit.Wrap(err, "Error while deleting log file", "stderr", stderr)
 	}
 
 	log.Print("Reset of the application was successful.", field.M{"app": tlc.name})
@@ -133,7 +133,7 @@ func (tlc *TimeLogCSI) Ping(ctx context.Context) error {
 	listDirectories := []string{"sh", "-c", "ls /var/log"}
 	stderr, err := tlc.execCommand(ctx, listDirectories)
 	if err != nil {
-		return errors.Wrapf(err, "Error while Pinging the application %s", stderr)
+		return errkit.Wrap(err, "Error while Pinging the application", "stderr", stderr)
 	}
 
 	log.Print("Ping to the application was success.", field.M{"app": tlc.name})
@@ -167,9 +167,9 @@ func (tlc *TimeLogCSI) GetClusterScopedResources(ctx context.Context) []crv1alph
 func (tlc *TimeLogCSI) execCommand(ctx context.Context, command []string) (string, error) {
 	podname, containername, err := kube.GetPodContainerFromDeployment(ctx, tlc.cli, tlc.namespace, tlc.name)
 	if err != nil || podname == "" {
-		return "", errors.Wrapf(err, "Error getting pod and containername %s.", tlc.name)
+		return "", errkit.Wrap(err, "Error getting pod and containername.", "deployment", tlc.name)
 	}
-	_, stderr, err := kube.Exec(tlc.cli, tlc.namespace, podname, containername, command, nil)
+	_, stderr, err := kube.Exec(ctx, tlc.cli, tlc.namespace, podname, containername, command, nil)
 	return stderr, err
 }
 
@@ -192,7 +192,7 @@ func (tlc TimeLogCSI) getAppDeploymentObj() *appsv1.Deployment {
 					Containers: []corev1.Container{
 						{
 							Name:    "test-container",
-							Image:   "ghcr.io/kanisterio/kanister-tools:0.104.0",
+							Image:   "ghcr.io/kanisterio/kanister-tools:0.110.0",
 							Command: []string{"sh", "-c"},
 							Args:    []string{"while true; do for x in $(seq 1200); do date >> /var/log/time.log; sleep 1; done; truncate /var/log/time.log --size 0; done"},
 							VolumeMounts: []corev1.VolumeMount{
@@ -230,7 +230,7 @@ func (tlc TimeLogCSI) getAppPersistentVolumeClaimObj() *corev1.PersistentVolumeC
 		Spec: corev1.PersistentVolumeClaimSpec{
 			StorageClassName: &storageClassName,
 			AccessModes:      []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
-			Resources: corev1.ResourceRequirements{
+			Resources: corev1.VolumeResourceRequirements{
 				Requests: corev1.ResourceList{
 					corev1.ResourceStorage: *resource.NewQuantity(1073741824, resource.BinarySI),
 				},

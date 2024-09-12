@@ -3,7 +3,7 @@
 ARG TOOLS_IMAGE
 FROM ${TOOLS_IMAGE} AS TOOLS_IMAGE
 
-FROM bitnami/mongodb:7.0.4-debian-11-r0
+FROM bitnami/mongodb:7.0-debian-12
 
 LABEL maintainer="Tom Manville <tom@kasten.io>"
 
@@ -11,4 +11,4 @@ LABEL maintainer="Tom Manville <tom@kasten.io>"
 COPY --from=TOOLS_IMAGE /usr/local/bin/gosu /usr/local/bin/gosu
 
 # Install kando
-ADD kando /usr/local/bin/
+COPY --from=TOOLS_IMAGE /usr/local/bin/kando /usr/local/bin/kando

@@ -52,6 +52,14 @@ make test
 make build-controller
 ```
 
+To build kanister tools (kanctl and kando), use the following conmmand:
+```sh
+make build GOBORING=true BIN=<kanctl|kando> ARCH=<arm64|amd64>
+```
+
+This will build a selected binary `BIN` for a selected architecture `ARCH`.
+
+
 To build the controller OCI image:
 ```sh
 make release-controller \
@@ -100,6 +108,89 @@ helm upgrade kanister ./helm/kanister-operator \
 Most of the Makefile targets can work in a non-Docker development setup, by
 setting the `DOCKER_BUILD` variable to `false`.
 
+## Testing
+
+Kanister is using `check` library to extend go testing capabilities: https://github.com/kastenhq/check
+It's recommended to write new tests using this library for consistency.
+
+`make test` runs all tests in the repository.
+It's possible to run a specific test with `TEST_FILTER` environment variable:
+
+```
+make tests TEST_FILTER=OutputTestSuite
+```
+
+This variable will be passed to `-check.f` flag and supports regex filters.
+
+To run tests for specific package you can run `go test` in that package directory.
+It's recommended to do that in build image shell, you can run it with `make shell`.
+
+The `check` library handles arguments differently from standard `go test`
+- to run specific test, you can use `-check.f <test regex>` to filter test (or suite) names
+- to increase verbosity, you can use `-check.v` or `-check.vv`
+- to controll how many suites from the package run in parallel, you can use `-check.suitep <number>`
+
+See https://github.com/kastenhq/check and https://github.com/kastenhq/check/blob/v1/run.go#L30 for more information
+
+
+## Integration Tests
+
+Integration tests verify that different components of Kanister work together as
+expected. They are located in the `pkg/testing` directory.
+
+### Prerequisites
+
+Before running integration tests, ensure the following:
+
+* **MinIO:** Make sure MinIO is installed and running. Use the following 
+  command to install it:
+   ```bash
+   make install-minio
+   ```
+
+### Running Tests
+
+To execute the integration tests, use the following Makefile target:
+
+```bash
+make integration-test [app-type]
+```
+
+Replace `[app-type]` with one of the following options:
+
+* **`all`:** Runs all integration tests.
+* **`short`:** Runs a quick subset of tests for common applications
+  (PostgreSQL, MySQL, MongoDB, MSSQL).
+* **`openshift ocp_version=<ocp_version>`:** Runs tests specifically for a 
+  certain OpenShift version. Replace `<ocp_version>` with the version you 
+  want to test (e.g., `openshift ocp_version=4.13`). Currently supported 
+  versions are 3.11, 4.4, 4.5, 4.10, 4.11, 4.12, and 4.13.
+
+### Test Selection
+
+You can also control which integration tests are run by setting the 
+`TEST_APPS` environment variable.
+
+### Examples
+
+**Running all integration tests:**
+
+```bash
+make integration-test all
+```
+
+**Running the short suite of tests:**
+
+```bash
+make integration-test short  # Or simply 'make integration-test'
+```
+
+**Running tests for OpenShift 4.13:**
+
+```bash
+make integration-test openshift ocp_version=4.13
+```
+
 ## Documentation
 
 The source of the documentation is found in the `docs` folder. They are written
@@ -114,6 +205,37 @@ make docs
 The `docs` target uses the `ghcr.io/kanisterio/docker-sphinx` public image to
 generate the HTML documents and store them in your local `/docs/_build/html`
 folder.
+
+## New Documentation
+
+We have started experimenting, and will soon fully transition, to using
+ [VitePress](https://vitepress.dev/) to generate Kanister documentation.
+This requires the documentation files to be written in 
+[Markdown](https://www.markdownguide.org/), along with some 
+[extensions](https://vitepress.dev/guide/markdown).
+
+This new documentation system offers a live-dev server that will dynamically
+render Markdown documentation files as you are making changes to them on your
+local machine/branch.
+To start this development server, place yourself in the `docs_new` folder, then
+run the following commands:
+
+```sh
+pnpm install
+pnpm run docs:dev
+```
+
+To render/build the docs locally (it will generate static assets, like HTML
+pages, Javascript/CSS files, etc.), use this command:
+```sh
+pnpm run docs:build
+```
+
+To start a local webserver that you can use to preview the documentation that
+has been rendered by the command above, use this command:
+```sh
+pnpm run docs:preview
+```
 
 ## New Blueprints
 

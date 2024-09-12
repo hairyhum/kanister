@@ -33,6 +33,7 @@ import (
 	"github.com/kanisterio/kanister/pkg/param"
 	"github.com/kanisterio/kanister/pkg/progress"
 	"github.com/kanisterio/kanister/pkg/restic"
+	"github.com/kanisterio/kanister/pkg/utils"
 )
 
 const (
@@ -81,6 +82,7 @@ func (b *backupDataAllFunc) Exec(ctx context.Context, tp param.TemplateParams, a
 
 	var namespace, pods, container, includePath, backupArtifactPrefix, encryptionKey string
 	var err error
+	var insecureTLS bool
 	if err = Arg(args, BackupDataAllNamespaceArg, &namespace); err != nil {
 		return nil, err
 	}
@@ -97,6 +99,9 @@ func (b *backupDataAllFunc) Exec(ctx context.Context, tp param.TemplateParams, a
 		return nil, err
 	}
 	if err = OptArg(args, BackupDataAllEncryptionKeyArg, &encryptionKey, restic.GeneratePassword()); err != nil {
+		return nil, err
+	}
+	if err = OptArg(args, InsecureTLS, &insecureTLS, false); err != nil {
 		return nil, err
 	}
 
@@ -124,7 +129,7 @@ func (b *backupDataAllFunc) Exec(ctx context.Context, tp param.TemplateParams, a
 		ps = strings.Fields(pods)
 	}
 	ctx = field.Context(ctx, consts.ContainerNameKey, container)
-	return backupDataAll(ctx, cli, namespace, ps, container, backupArtifactPrefix, includePath, encryptionKey, tp)
+	return backupDataAll(ctx, cli, namespace, ps, container, backupArtifactPrefix, includePath, encryptionKey, insecureTLS, tp)
 }
 
 func (*backupDataAllFunc) RequiredArgs() []string {
@@ -144,10 +149,20 @@ func (*backupDataAllFunc) Arguments() []string {
 		BackupDataAllBackupArtifactPrefixArg,
 		BackupDataAllPodsArg,
 		BackupDataAllEncryptionKeyArg,
+		InsecureTLS,
 	}
 }
 
-func backupDataAll(ctx context.Context, cli kubernetes.Interface, namespace string, ps []string, container string, backupArtifactPrefix, includePath, encryptionKey string, tp param.TemplateParams) (map[string]interface{}, error) {
+func (b *backupDataAllFunc) Validate(args map[string]any) error {
+	if err := utils.CheckSupportedArgs(b.Arguments(), args); err != nil {
+		return err
+	}
+
+	return utils.CheckRequiredArgs(b.RequiredArgs(), args)
+}
+
+func backupDataAll(ctx context.Context, cli kubernetes.Interface, namespace string, ps []string, container string, backupArtifactPrefix, includePath, encryptionKey string,
+	insecureTLS bool, tp param.TemplateParams) (map[string]interface{}, error) {
 	errChan := make(chan error, len(ps))
 	outChan := make(chan BackupInfo, len(ps))
 	Output := make(map[string]BackupInfo)
@@ -155,7 +170,7 @@ func backupDataAll(ctx context.Context, cli kubernetes.Interface, namespace stri
 	for _, pod := range ps {
 		go func(pod string, container string) {
 			ctx = field.Context(ctx, consts.PodNameKey, pod)
-			backupOutputs, err := backupData(ctx, cli, namespace, pod, container, fmt.Sprintf("%s/%s", backupArtifactPrefix, pod), includePath, encryptionKey, tp)
+			backupOutputs, err := backupData(ctx, cli, namespace, pod, container, fmt.Sprintf("%s/%s", backupArtifactPrefix, pod), includePath, encryptionKey, insecureTLS, tp)
 			errChan <- errors.Wrapf(err, "Failed to backup data for pod %s", pod)
 			outChan <- BackupInfo{PodName: pod, BackupID: backupOutputs.backupID, BackupTag: backupOutputs.backupTag}
 		}(pod, container)

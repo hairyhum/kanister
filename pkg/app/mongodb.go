@@ -22,7 +22,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/pkg/errors"
+	"github.com/kanisterio/errkit"
 	"k8s.io/client-go/kubernetes"
 
 	crv1alpha1 "github.com/kanisterio/kanister/pkg/apis/cr/v1alpha1"
@@ -36,7 +36,7 @@ const (
 	mongoWaitTimeout = 5 * time.Minute
 )
 
-// IsMaster struct gets mapped to the output of the mongo command that checks if node is master or not.
+// IsMasterOutput struct gets mapped to the output of the mongo command that checks if node is master or not.
 type IsMasterOutput struct {
 	Ismaster bool `json:"ismaster"`
 }
@@ -51,6 +51,7 @@ type MongoDB struct {
 	chart     helm.ChartInfo
 }
 
+// NewMongoDB initialises an instance of Mongo DB
 // Last tested working version "9.0.0"
 func NewMongoDB(name string) HelmApp {
 	return &MongoDB{
@@ -61,6 +62,7 @@ func NewMongoDB(name string) HelmApp {
 			RepoURL:  helm.BitnamiRepoURL,
 			RepoName: helm.BitnamiRepoName,
 			Chart:    "mongodb",
+			Version:  "14.11.1",
 			Values: map[string]string{
 				"architecture":     "replicaset",
 				"image.pullPolicy": "Always",
@@ -91,7 +93,7 @@ func (mongo *MongoDB) Install(ctx context.Context, namespace string) error {
 	mongo.namespace = namespace
 	cli, err := helm.NewCliClient()
 	if err != nil {
-		return errors.Wrap(err, "failed to create helm client")
+		return errkit.Wrap(err, "failed to create helm client")
 	}
 
 	log.Print("Adding repo for the application.", field.M{"app": mongo.name})
@@ -101,7 +103,7 @@ func (mongo *MongoDB) Install(ctx context.Context, namespace string) error {
 	}
 
 	log.Print("Installing application using helm.", field.M{"app": mongo.name})
-	err = cli.Install(ctx, fmt.Sprintf("%s/%s", mongo.chart.RepoName, mongo.chart.Chart), mongo.chart.Version, mongo.chart.Release, mongo.namespace, mongo.chart.Values, true)
+	_, err = cli.Install(ctx, fmt.Sprintf("%s/%s", mongo.chart.RepoName, mongo.chart.Chart), mongo.chart.Version, mongo.chart.Release, mongo.namespace, mongo.chart.Values, true, false)
 	if err != nil {
 		return err
 	}
@@ -137,11 +139,11 @@ func (mongo *MongoDB) Object() crv1alpha1.ObjectReference {
 func (mongo *MongoDB) Uninstall(ctx context.Context) error {
 	cli, err := helm.NewCliClient()
 	if err != nil {
-		return errors.Wrap(err, "failed to create helm client")
+		return errkit.Wrap(err, "failed to create helm client")
 	}
 	log.Print("Uninstalling application.", field.M{"app": mongo.name})
 	err = cli.Uninstall(ctx, mongo.chart.Release, mongo.namespace)
-	return errors.Wrapf(err, "Error while uninstalling the application.")
+	return errkit.Wrap(err, "Error while uninstalling the application.")
 }
 
 func (mongo *MongoDB) GetClusterScopedResources(ctx context.Context) []crv1alpha1.ObjectReference {
@@ -153,7 +155,7 @@ func (mongo *MongoDB) Ping(ctx context.Context) error {
 	pingCMD := []string{"sh", "-c", fmt.Sprintf("mongosh admin --authenticationDatabase admin -u %s -p $MONGODB_ROOT_PASSWORD --quiet --eval \"db\"", mongo.username)}
 	_, stderr, err := mongo.execCommand(ctx, pingCMD)
 	if err != nil {
-		return errors.Wrapf(err, "Error while pinging the mongodb application %s", stderr)
+		return errkit.Wrap(err, "Error while pinging the mongodb application", "stderr", stderr)
 	}
 
 	// even after ping is successful, it takes some time for primary pod to becomd the master
@@ -161,17 +163,17 @@ func (mongo *MongoDB) Ping(ctx context.Context) error {
 	isMasterCMD := []string{"sh", "-c", fmt.Sprintf("mongosh admin --authenticationDatabase admin -u %s -p $MONGODB_ROOT_PASSWORD --quiet --eval \"JSON.stringify(db.isMaster())\"", mongo.username)}
 	stdout, stderr, err := mongo.execCommand(ctx, isMasterCMD)
 	if err != nil {
-		return errors.Wrapf(err, "Error %s checking if the pod is master.", stderr)
+		return errkit.Wrap(err, "Error checking if the pod is master.", "stderr", stderr)
 	}
 
 	// convert the mongo's output to go struct so that we can check if the pod has become master or not.
 	op := IsMasterOutput{}
 	err = json.Unmarshal([]byte(stdout), &op)
 	if err != nil {
-		return errors.Wrapf(err, "Error unmarshalling the ismaster ouptut.")
+		return errkit.Wrap(err, "Error unmarshalling the ismaster ouptut.")
 	}
 	if !op.Ismaster {
-		return errors.New("the pod is not master yet")
+		return errkit.New("the pod is not master yet")
 	}
 
 	log.Print("Ping was successful to application.", field.M{"app": mongo.name})
@@ -185,7 +187,7 @@ func (mongo *MongoDB) Insert(ctx context.Context) error {
 		"'cuisine' : 'Hawaiian', 'id' : '8675309'})\"", mongo.username, uuid.New())}
 	_, stderr, err := mongo.execCommand(ctx, insertCMD)
 	if err != nil {
-		return errors.Wrapf(err, "Error %s while inserting data data into mongodb collection.", stderr)
+		return errkit.Wrap(err, "Error while inserting data data into mongodb collection.", "stderr", stderr)
 	}
 
 	log.Print("Insertion of documents into collection was successful.", field.M{"app": mongo.name})
@@ -197,7 +199,7 @@ func (mongo *MongoDB) Count(ctx context.Context) (int, error) {
 	countCMD := []string{"sh", "-c", fmt.Sprintf("mongosh admin --authenticationDatabase admin -u %s -p $MONGODB_ROOT_PASSWORD --quiet --eval \"db.restaurants.countDocuments()\"", mongo.username)}
 	stdout, stderr, err := mongo.execCommand(ctx, countCMD)
 	if err != nil {
-		return 0, errors.Wrapf(err, "Error %s while counting the data in mongodb collection.", stderr)
+		return 0, errkit.Wrap(err, "Error while counting the data in mongodb collection.", "stderr", stderr)
 	}
 
 	count, err := strconv.Atoi(stdout)
@@ -215,7 +217,7 @@ func (mongo *MongoDB) Reset(ctx context.Context) error {
 	// and deletion admin database is prohibited
 	deleteDBCMD := []string{"sh", "-c", fmt.Sprintf("mongosh admin --authenticationDatabase admin -u %s -p $MONGODB_ROOT_PASSWORD --quiet --eval \"db.restaurants.drop()\"", mongo.username)}
 	stdout, stderr, err := mongo.execCommand(ctx, deleteDBCMD)
-	return errors.Wrapf(err, "Error %s, resetting the mongodb application. stdout is %s", stderr, stdout)
+	return errkit.Wrap(err, "Error resetting the mongodb application.", "stdout", stdout, "stderr", stderr)
 }
 
 // Initialize is used to initialize the database or create schema
@@ -228,5 +230,5 @@ func (mongo *MongoDB) execCommand(ctx context.Context, command []string) (string
 	if err != nil || podName == "" {
 		return "", "", err
 	}
-	return kube.Exec(mongo.cli, mongo.namespace, podName, containerName, command, nil)
+	return kube.Exec(ctx, mongo.cli, mongo.namespace, podName, containerName, command, nil)
 }

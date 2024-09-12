@@ -3,17 +3,17 @@
 # Declare variables to be passed into your templates.
 image:
   repository: ghcr.io/kanisterio/controller
-  tag: 0.104.0
+  tag: 0.110.0
   pullPolicy: IfNotPresent
 repositoryServerControllerImage:
   registry: ghcr.io/kanisterio
   name: repo-server-controller
-  tag: 0.104.0
+  tag: 0.110.0
   pullPolicy: IfNotPresent
 kanisterToolsImage:
   override: false
   image: ghcr.io/kanisterio/kanister-tools
-  tag: 0.104.0
+  tag: 0.110.0
 rbac:
   create: true
 serviceAccount:
@@ -31,12 +31,15 @@ controller:
   # false : CRDs would be created by helm
   # true : CRDs would be created by kanister controller
   updateCRDs: true
-  parallelism: 8
   metrics:
     # metrics.enabled specified if the kanister-prometheus framework has been enabled
     # false : kanister-prometheus framework has been disabled
     # true: kanister-prometheus framework has been enabled
     enabled: false
+dataStore:
+  parallelism:
+    upload: 8
+    download: 8
 bpValidatingWebhook:
   enabled: true
   # `tls` field is used to specify TLS information for both blueprint and repositoryserver validating webhook server 
@@ -76,3 +79,13 @@ resources:
 # requests:
 #  cpu: 100m
 #  memory: 128Mi
+#  
+# tolerations for pod assignment. Evaluated as a template  
+tolerations: []
+#- effect: NoSchedule
+#  key: CriticalAddonsOnly
+#  operator: Equal
+#  value: "true"        
+#
+# node labels for pod assignment. Evaluated as template
+nodeSelector: {}

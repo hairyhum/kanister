@@ -88,7 +88,7 @@ func parseVulerabilitiesReport(filePath string, severityLevels []string) ([]matc
 func printResult(mr []matchResponse, githubActionOutput bool) {
 	for _, response := range mr {
 		fmt.Printf("ID: %s\n", response.Vulnerabilities.ID)
-		fmt.Printf("Link: https://github.com/advisories/%s\n", response.Vulnerabilities.DataSource)
+		fmt.Printf("Link: %s\n", response.Vulnerabilities.DataSource)
 		fmt.Printf("Severity: %s\n", response.Vulnerabilities.Severity)
 		fmt.Printf("Namespace: %s\n", response.Vulnerabilities.Namespace)
 		fmt.Printf("Description: %s\n", response.Vulnerabilities.Description)
@@ -116,17 +116,17 @@ func printResult(mr []matchResponse, githubActionOutput bool) {
 func main() {
 	validSeverityLevels := []string{"Negliable", "Low", "Medium", "High", "Critical"}
 	severityInputList := flag.String("s", "High,Critical", "Comma separated list of severity levels to scan. Valid severity levels are: "+strings.Join(validSeverityLevels, ","))
-	reportJsonFilePath := flag.String("p", "", "Path to the JSON file containing the vulnerabilities report")
 	githubActionOutput := flag.Bool("github", false, "Whether to use github action output format")
+	reportJSONFilePath := flag.String("p", "", "Path to the JSON file containing the vulnerabilities report")
 	flag.Parse()
 
 	// passing file path is compulsory
-	if *reportJsonFilePath == "" {
+	if *reportJSONFilePath == "" {
 		flag.PrintDefaults()
 		os.Exit(1)
 	}
 	severityLevels := strings.Split(*severityInputList, ",")
-	mr, err := parseVulerabilitiesReport(*reportJsonFilePath, severityLevels)
+	mr, err := parseVulerabilitiesReport(*reportJSONFilePath, severityLevels)
 	if err != nil {
 		fmt.Printf("Failed to parse vulnerabilities report: %v\n", err)
 		os.Exit(1)

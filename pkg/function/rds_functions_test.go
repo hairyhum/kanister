@@ -19,9 +19,10 @@ import (
 	"fmt"
 	"strings"
 
+	. "gopkg.in/check.v1"
+
 	"github.com/kanisterio/kanister/pkg/param"
 	"github.com/kanisterio/kanister/pkg/postgres"
-	. "gopkg.in/check.v1"
 )
 
 type RDSFunctionsTest struct{}
@@ -127,7 +128,7 @@ func (s *RDSFunctionsTest) TestPrepareCommand(c *C) {
 	}
 
 	for _, tc := range testCases {
-		outCommand, _, err := prepareCommand(context.Background(), tc.dbEngine, tc.action, tc.dbEndpoint, tc.username, tc.password, tc.dbList, tc.backupPrefix, tc.backupID, tc.tp.Profile, tc.dbEngineVersion)
+		outCommand, err := prepareCommand(context.Background(), tc.dbEngine, tc.action, tc.dbEndpoint, tc.username, tc.password, tc.dbList, tc.backupPrefix, tc.backupID, tc.tp.Profile, tc.dbEngineVersion)
 
 		c.Check(err, tc.errChecker, Commentf("Case %s failed", tc.name))
 		c.Assert(outCommand, DeepEquals, tc.command)

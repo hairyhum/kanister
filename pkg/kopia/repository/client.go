@@ -22,9 +22,9 @@ import (
 	"time"
 
 	"github.com/jpillora/backoff"
+	"github.com/kanisterio/errkit"
 	"github.com/kopia/kopia/repo"
 	"github.com/kopia/kopia/repo/content"
-	"github.com/pkg/errors"
 
 	"github.com/kanisterio/kanister/pkg/kopia"
 	"github.com/kanisterio/kanister/pkg/log"
@@ -33,8 +33,20 @@ import (
 
 const (
 	defaultConnectMaxListCacheDuration time.Duration = time.Second * 600
-	kopiaGetRepoParametersError                      = "unable to get repository parameters"
+	connectionRefusedError                           = "connection refused"
+	Pbkdf2Algorithm                                  = "pbkdf2-sha256-600000"
+
+	// maxConnectRetries with value 100 results in ~23 total minutes of
+	// retries with the apiConnectBackoff settings defined below.
+	maxConnectionRetries = 100
 )
+
+var apiConnectBackoff = backoff.Backoff{
+	Factor: 2,
+	Jitter: false,
+	Min:    100 * time.Millisecond,
+	Max:    15 * time.Second,
+}
 
 // ConnectToAPIServer connects to the Kopia API server running at the given address
 func ConnectToAPIServer(
@@ -50,14 +62,13 @@ func ConnectToAPIServer(
 	// Extra fingerprint from the TLS Certificate secret
 	fingerprint, err := kopia.ExtractFingerprintFromCertificate(tlsCert)
 	if err != nil {
-		return errors.Wrap(err, "Failed to extract fingerprint from Kopia API Server Certificate Secret")
+		return errkit.Wrap(err, "Failed to extract fingerprint from Kopia API Server Certificate Secret")
 	}
 
 	serverInfo := &repo.APIServerInfo{
 		BaseURL:                             serverAddress,
 		TrustedServerCertificateFingerprint: fingerprint,
-		// TODO(@pavan): Remove once GRPC support is added (kopia 0.8 release)
-		DisableGRPC: true,
+		LocalCacheKeyDerivationAlgorithm:    Pbkdf2Algorithm,
 	}
 
 	opts := &repo.ConnectOptions{
@@ -75,24 +86,21 @@ func ConnectToAPIServer(
 		},
 	}
 
-	err = poll.WaitWithBackoff(ctx, backoff.Backoff{
-		Factor: 2,
-		Jitter: false,
-		Min:    100 * time.Millisecond,
-		Max:    15 * time.Second,
-	}, func(c context.Context) (bool, error) {
+	err = poll.WaitWithBackoffWithRetries(ctx, apiConnectBackoff, maxConnectionRetries, isErrConnectionRefused, func(c context.Context) (bool, error) {
 		// TODO(@pavan): Modify this to use custom config file path, if required
 		err := repo.ConnectAPIServer(ctx, kopia.DefaultClientConfigFilePath, serverInfo, userPassphrase, opts)
-		switch {
-		case isGetRepoParametersError(err):
+		if err != nil {
 			log.Debug().WithError(err).Print("Connecting to the Kopia API Server")
-			return false, nil
-		case err != nil:
 			return false, err
 		}
 		return true, nil
 	})
-	return errors.Wrap(err, "Failed connecting to the Kopia API Server")
+
+	if err != nil {
+		return errkit.Wrap(err, "Failed connecting to the Kopia API Server")
+	}
+
+	return nil
 }
 
 // Open connects to the kopia repository based on the config stored in the config file
@@ -101,16 +109,16 @@ func ConnectToAPIServer(
 func Open(ctx context.Context, configFile, password, purpose string) (repo.RepositoryWriter, error) {
 	repoConfig := repositoryConfigFileName(configFile)
 	if _, err := os.Stat(repoConfig); os.IsNotExist(err) {
-		return nil, errors.New("Failed find kopia configuration file")
+		return nil, errkit.New("Failed find kopia configuration file")
 	}
 
 	r, err := repo.Open(ctx, repoConfig, password, &repo.Options{})
 	if os.IsNotExist(err) {
-		return nil, errors.New("Failed to find kopia repository, use `kopia repository create` or kopia repository connect` if already created")
+		return nil, errkit.New("Failed to find kopia repository, use `kopia repository create` or kopia repository connect` if already created")
 	}
 
 	if err != nil {
-		return nil, errors.Wrap(err, "Failed to open kopia repository")
+		return nil, errkit.Wrap(err, "Failed to open kopia repository")
 	}
 
 	_, rw, err := r.NewWriter(ctx, repo.WriteSessionOptions{
@@ -118,7 +126,11 @@ func Open(ctx context.Context, configFile, password, purpose string) (repo.Repos
 		OnUpload: func(i int64) {},
 	})
 
-	return rw, errors.Wrap(err, "Failed to open kopia repository writer")
+	if err != nil {
+		return nil, errkit.Wrap(err, "Failed to open kopia repository writer")
+	}
+
+	return rw, nil
 }
 
 func repositoryConfigFileName(configFile string) string {
@@ -128,6 +140,6 @@ func repositoryConfigFileName(configFile string) string {
 	return filepath.Join(os.Getenv("HOME"), ".config", "kopia", "repository.config")
 }
 
-func isGetRepoParametersError(err error) bool {
-	return err != nil && strings.Contains(err.Error(), kopiaGetRepoParametersError)
+func isErrConnectionRefused(err error) bool {
+	return err != nil && strings.Contains(err.Error(), connectionRefusedError)
 }

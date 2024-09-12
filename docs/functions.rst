@@ -123,6 +123,8 @@ This allows you to run a new Pod from a Blueprint.
    `image`, Yes, `string`, image to be used for executing the task
    `command`, Yes, `[]string`,  command list to execute
    `podOverride`, No, `map[string]interface{}`, specs to override default pod specs with
+   `podAnnotations`, No, `map[string]string`, custom annotations for the temporary pod that gets created
+   `podLabels`, No, `map[string]string`, custom labels for the temporary pod that gets created
 
 Example:
 
@@ -138,6 +140,10 @@ Example:
         containers:
         - name: container
           imagePullPolicy: IfNotPresent
+      podAnnotations:
+        annKey: annValue
+      podLabels:
+        labelKey: labelValue
       command:
         - sh
         - -c
@@ -241,6 +247,8 @@ ScaleWorkload.
    `command`, Yes, `[]string`,  command list to execute
    `serviceaccount`, No, `string`,  service account info
    `podOverride`, No, `map[string]interface{}`, specs to override default pod specs with
+   `podAnnotations`, No, `map[string]string`, custom annotations for the temporary pod that gets created
+   `podLabels`, No, `map[string]string`, custom labels for the temporary pod that gets created
 
 .. note::
    The ``volumes`` argument does not support ``subPath`` mounts so the
@@ -270,6 +278,10 @@ Example:
       volumes:
         application-pvc-1: "/data"
         application-pvc-2: "/restore-data"
+      podAnnotations:
+        annKey: annValue
+      podLabels:
+        labelKey: labelValue
       command:
         - sh
         - -c
@@ -306,6 +318,7 @@ Arguments:
    `includePath`, Yes, `string`, path of the data to be backed up
    `backupArtifactPrefix`, Yes, `string`, path to store the backup on the object store
    `encryptionKey`, No, `string`, encryption key to be used for backups
+   `insecureTLS`, No, `bool`, enables insecure connection for data mover
 
 Outputs:
 
@@ -368,6 +381,7 @@ Arguments:
    `includePath`, Yes, `string`, path of the data to be backed up
    `backupArtifactPrefix`, Yes, `string`, path to store the backup on the object store appended by pod name later
    `encryptionKey`, No, `string`, encryption key to be used for backups
+   `insecureTLS`, No, `bool`, enables insecure connection for data mover
 
 Outputs:
 
@@ -430,7 +444,10 @@ and restores data to the specified path.
    `pod`, No, `string`, pod to which the volumes are attached
    `volumes`, No, `map[string]string`, Mapping of `pvcName` to `mountPath` under which the volume will be available
    `encryptionKey`, No, `string`, encryption key to be used during backups
+   `insecureTLS`, No, `bool`, enables insecure connection for data mover
    `podOverride`, No, `map[string]interface{}`, specs to override default pod specs with
+   `podAnnotations`, No, `map[string]string`, custom annotations for the temporary pod that gets created
+   `podLabels`, No, `map[string]string`, custom labels for the temporary pod that gets created
 
 .. note::
    The ``image`` argument requires the use of ``ghcr.io/kanisterio/kanister-tools``
@@ -465,6 +482,10 @@ backup function.
       image: ghcr.io/kanisterio/kanister-tools:|version|
       backupArtifactPrefix: s3-bucket/path/artifactPrefix
       backupTag: "{{ .ArtifactsIn.backupInfo.KeyValue.backupIdentifier }}"
+      podAnnotations:
+        annKey: annValue
+      podLabels:
+        labelKey: labelValue
   - func: ScaleWorkload
     name: StartupApplication
     args:
@@ -505,7 +526,10 @@ respective PVCs and restores data to the specified path.
    `pods`, No, `string`, pods to which the volumes are attached
    `encryptionKey`, No, `string`, encryption key to be used during backups
    `backupInfo`, Yes, `string`, snapshot info generated as output in BackupDataAll function
+   `insecureTLS`, No, `bool`, enables insecure connection for data mover
    `podOverride`, No, `map[string]interface{}`, specs to override default pod specs with
+   `podAnnotations`, No, `map[string]string`, custom annotations for the temporary pod that gets created
+   `podLabels`, No, `map[string]string`, custom labels for the temporary pod that gets created
 
 .. note::
    The `image` argument requires the use of `ghcr.io/kanisterio/kanister-tools`
@@ -540,6 +564,10 @@ BackupDataAll function.
       image: ghcr.io/kanisterio/kanister-tools:|version|
       backupArtifactPrefix: s3-bucket/path/artifactPrefix
       backupInfo: "{{ .ArtifactsIn.params.KeyValue.backupInfo }}"
+      podAnnotations:
+        annKey: annValue
+      podLabels:
+        labelKey: labelValue
   - func: ScaleWorkload
     name: StartupApplication
     args:
@@ -575,7 +603,10 @@ Arguments:
    `volume`, Yes, `string`, name of the source PVC
    `dataArtifactPrefix`, Yes, `string`, path on the object store to store the data in
    `encryptionKey`, No, `string`, encryption key to be used during backups
+   `insecureTLS`, No, `bool`, enables insecure connection for data mover
    `podOverride`, No, `map[string]interface{}`, specs to override default pod specs with
+   `podAnnotations`, No, `map[string]string`, custom annotations for the temporary pod that gets created
+   `podLabels`, No, `map[string]string`, custom labels for the temporary pod that gets created
 
 Outputs:
 
@@ -601,6 +632,10 @@ If the ActionSet ``Object`` is a PersistentVolumeClaim:
       namespace: "{{ .PVC.Namespace }}"
       volume: "{{ .PVC.Name }}"
       dataArtifactPrefix: s3-bucket-name/path
+      podAnnotations:
+        annKey: annValue
+      podLabels:
+        labelKey: labelValue
 
 .. _deletedata:
 
@@ -620,7 +655,10 @@ This function deletes the snapshot data backed up by the :ref:`backupdata` funct
    `backupID`, No, `string`, (required if backupTag not provided) unique snapshot id generated during backup
    `backupTag`, No, `string`, (required if backupID not provided) unique tag added during the backup
    `encryptionKey`, No, `string`, encryption key to be used during backups
+   `insecureTLS`, No, `bool`, enables insecure connection for data mover
    `podOverride`, No, `map[string]interface{}`, specs to override default pod specs with
+   `podAnnotations`, No, `map[string]string`, custom annotations for the temporary pod that gets created
+   `podLabels`, No, `map[string]string`, custom labels for the temporary pod that gets created
 
 Example:
 
@@ -637,6 +675,10 @@ For this phase, we will use the ``backupInfo`` Artifact provided by backup funct
       namespace: "{{ .Namespace.Name }}"
       backupArtifactPrefix: s3-bucket/path/artifactPrefix
       backupTag: "{{ .ArtifactsIn.backupInfo.KeyValue.backupIdentifier }}"
+      podAnnotations:
+        annKey: annValue
+      podLabels:
+        labelKey: labelValue
 
 .. _deletedataall:
 
@@ -657,7 +699,10 @@ BackupDataAll function.
    `backupInfo`, Yes, `string`, snapshot info generated as output in BackupDataAll function
    `encryptionKey`, No, `string`, encryption key to be used during backups
    `reclaimSpace`, No, `bool`, provides a way to specify if space should be reclaimed
+   `insecureTLS`, No, `bool`, enables insecure connection for data mover
    `podOverride`, No, `map[string]interface{}`, specs to override default pod specs with
+   `podAnnotations`, No, `map[string]string`, custom annotations for the temporary pod that gets created
+   `podLabels`, No, `map[string]string`, custom labels for the temporary pod that gets created
 
 Example:
 
@@ -675,6 +720,10 @@ For this phase, we will use the ``params`` Artifact provided by backup function.
       backupArtifactPrefix: s3-bucket/path/artifactPrefix
       backupInfo: "{{ .ArtifactsIn.params.KeyValue.backupInfo }}"
       reclaimSpace: true
+      podAnnotations:
+        annKey: annValue
+      podLabels:
+        labelKey: labelValue
 
 LocationDelete
 --------------
@@ -872,6 +921,8 @@ Arguments:
    `backupID`, Yes, `string`, unique snapshot id generated during backup
    `mode`, No, `string`, mode in which stats are expected
    `encryptionKey`, No, `string`, encryption key to be used for backups
+   `podAnnotations`, No, `map[string]string`, custom annotations for the temporary pod that gets created
+   `podLabels`, No, `map[string]string`, custom labels for the temporary pod that gets created
 
 Outputs:
 
@@ -905,6 +956,10 @@ Example:
             backupArtifactPrefix: s3-bucket/path/artifactPrefix
             mode: restore-size
             backupID: "{{ .ArtifactsIn.snapshot.KeyValue.backupIdentifier }}"
+            podAnnotations:
+              annKey: annValue
+            podLabels:
+              labelKey: labelValue
 
 
 CreateRDSSnapshot
@@ -983,6 +1038,9 @@ Arguments:
    `databases`, No, `[]string`, list of databases to take backup of
    `securityGroupID`, No, `[]string`, list of ``securityGroupID`` to be passed to temporary RDS instance. ()
    `dbSubnetGroup`, No, `string`, DB Subnet Group to be passed to temporary RDS instance
+   `image`, No, `string`, kanister-tools image to be used for running export job
+   `podAnnotations`, No, `map[string]string`, custom annotations for the temporary pod that gets created
+   `podLabels`, No, `map[string]string`, custom labels for the temporary pod that gets created
 
 .. note::
    - If ``databases`` argument is not set, backup of all the databases will be taken.
@@ -1044,6 +1102,10 @@ Example:
           snapshotID: "{{ .Phases.createSnapshot.Output.snapshotID }}"
           backupArtifactPrefix: test-postgresql-instance/postgres
           dbSubnetGroup: "{{ .Phases.createSnapshot.Output.dbSubnetGroup }}"
+          podAnnotations:
+            annKey: annValue
+          podLabels:
+            labelKey: labelValue
 
 
 RestoreRDSSnapshot
@@ -1073,6 +1135,9 @@ Arguments:
    `namespace`, No, `string`, namespace in which to execute. Required if ``snapshotID`` is nil
    `dbEngine`, No, `string`, one of the RDS db engines. Supported engines: ``PostgreSQL`` ``aurora`` ``aurora-mysql`` and ``aurora-postgresql``. Required if ``snapshotID`` is nil or Aurora is run in RDS instance
    `dbSubnetGroup`, No, `string`, DB Subnet Group to be passed to restored RDS instance
+   `image`, No, `string`, kanister-tools image to be used for running restore. Only relevant when restoring from data dump (if `snapshotID` is empty)
+   `podAnnotations`, No, `map[string]string`, custom annotations for the temporary pod that gets created
+   `podLabels`, No, `map[string]string`, custom labels for the temporary pod that gets created
 
 .. note::
    - If ``snapshotID`` is not set, restore will be done from data dump. In that case ``backupID`` `arg` is required.
@@ -1115,6 +1180,10 @@ Example:
         password: '{{ index .Phases.restoreSnapshots.Secrets.dbsecret.Data "password" | toString }}'
         dbEngine: "PostgreSQL"
         dbSubnetGroup: "{{ .ArtifactsIn.backupInfo.KeyValue.dbSubnetGroup }}"
+        podAnnotations:
+          annKey: annValue
+        podLabels:
+          labelKey: labelValue
 
 DeleteRDSSnapshot
 -----------------
@@ -1637,6 +1706,8 @@ function argument and restores data to the specified path.
    `volumes`, No, `map[string]string`, mapping of `pvcName` to `mountPath` under which the volume will be available
    `podOverride`, No, `map[string]interface{}`, specs to override default pod specs with
    `repositoryServerUserHostname`, No, `string`, user's hostname to access the kopia repository server. Hostname would be available in the user access credential secret
+   `podAnnotations`, No, `map[string]string`, custom annotations for the temporary pod that gets created
+   `podLabels`, No, `map[string]string`, custom labels for the temporary pod that gets created
 
 .. note::
    The ``image`` argument requires the use of ``ghcr.io/kanisterio/kanister-tools``
@@ -1675,6 +1746,10 @@ backup function.
       pod: "{{ index .Deployment.Pods 0 }}"
       backupIdentifier: "{{ .ArtifactsIn.backupIdentifier.KeyValue.id }}"
       restorePath: /mnt/data
+      podAnnotations:
+        annKey: annValue
+      podLabels:
+        labelKey: labelValue
   - func: ScaleWorkload
     name: bringupPod
     args:
@@ -1707,6 +1782,8 @@ function. It creates a new Pod that runs ``delete snapshot`` command.
    `backupID`, Yes, `string`, unique snapshot id generated during backup
    `image`, Yes, `string`, image to be used for running delete job (should contain kopia binary)
    `repositoryServerUserHostname`, No, `string`, user's hostname to access the kopia repository server. Hostname would be available in the user access credential secret
+   `podAnnotations`, No, `map[string]string`, custom annotations for the temporary pod that gets created
+   `podLabels`, No, `map[string]string`, custom labels for the temporary pod that gets created
 
 Example:
 
@@ -1723,6 +1800,10 @@ For this phase, we will use the ``backupIdentifier`` Artifact provided by backup
       namespace: "{{ .Deployment.Namespace }}"
       backupID: "{{ .ArtifactsIn.backupIdentifier.KeyValue.id }}"
       image: ghcr.io/kanisterio/kanister-tools:0.89.0
+      podAnnotations:
+        annKey: annValue
+      podLabels:
+        labelKey: labelValue
 
 Registering Functions
 ---------------------

@@ -30,6 +30,7 @@ import (
 	"github.com/kanisterio/kanister/pkg/kube"
 	"github.com/kanisterio/kanister/pkg/param"
 	"github.com/kanisterio/kanister/pkg/progress"
+	"github.com/kanisterio/kanister/pkg/utils"
 )
 
 func init() {
@@ -161,6 +162,14 @@ func (*restoreCSISnapshotFunc) Arguments() []string {
 	}
 }
 
+func (r *restoreCSISnapshotFunc) Validate(args map[string]any) error {
+	if err := utils.CheckSupportedArgs(r.Arguments(), args); err != nil {
+		return err
+	}
+
+	return utils.CheckRequiredArgs(r.RequiredArgs(), args)
+}
+
 func (d *restoreCSISnapshotFunc) ExecutionProgress() (crv1alpha1.PhaseProgress, error) {
 	metav1Time := metav1.NewTime(time.Now())
 	return crv1alpha1.PhaseProgress{
@@ -198,7 +207,7 @@ func newPVCManifest(args restoreCSISnapshotArgs) *corev1.PersistentVolumeClaim {
 				Name:     args.Name,
 			},
 			StorageClassName: &args.StorageClass,
-			Resources: corev1.ResourceRequirements{
+			Resources: corev1.VolumeResourceRequirements{
 				Requests: corev1.ResourceList{
 					corev1.ResourceStorage: *args.RestoreSize,
 				},

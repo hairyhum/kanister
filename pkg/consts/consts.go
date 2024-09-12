@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Package consts declares all the constants.
 package consts
 
 const (
@@ -26,6 +27,7 @@ const (
 	LabelKeyCreatedBy        = "createdBy"
 	LabelValueKanister       = "kanister"
 	LabelPrefix              = "kanister.io/"
+	LabelSuffixJobID         = "JobID"
 )
 
 // These names are used to query ActionSet API objects.
@@ -38,12 +40,23 @@ const (
 	ProfileResourceNamePlural   = "profiles"
 )
 
-// These consts are used to query Repository server API objects
-const RepositoryServerResourceName = "repositoryserver"
-const RepositoryServerResourceNamePlural = "repositoryservers"
+const (
+	PVProvisionedByAnnotation = "pv.kubernetes.io/provisioned-by"
 
-const LatestKanisterToolsImage = "ghcr.io/kanisterio/kanister-tools:v9.99.9-dev"
-const KanisterToolsImage = "ghcr.io/kanisterio/kanister-tools:0.104.0"
+	AWSEBSProvisionerInTree = "kubernetes.io/aws-ebs"
+	GCEPDProvisionerInTree  = "kubernetes.io/gce-pd"
+)
+
+// These consts are used to query Repository server API objects
+const (
+	RepositoryServerResourceName       = "repositoryserver"
+	RepositoryServerResourceNamePlural = "repositoryservers"
+)
+
+const (
+	LatestKanisterToolsImage = "ghcr.io/kanisterio/kanister-tools:v9.99.9-dev"
+	KanisterToolsImage       = "ghcr.io/kanisterio/kanister-tools:0.110.0"
+)
 
 // KanisterToolsImageEnvName is used to set up a custom kanister-tools image
 const KanisterToolsImageEnvName = "KANISTER_TOOLS"

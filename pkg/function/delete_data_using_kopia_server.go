@@ -25,12 +25,14 @@ import (
 
 	kanister "github.com/kanisterio/kanister/pkg"
 	crv1alpha1 "github.com/kanisterio/kanister/pkg/apis/cr/v1alpha1"
+	"github.com/kanisterio/kanister/pkg/ephemeral"
 	"github.com/kanisterio/kanister/pkg/format"
 	kankopia "github.com/kanisterio/kanister/pkg/kopia"
 	kopiacmd "github.com/kanisterio/kanister/pkg/kopia/command"
 	"github.com/kanisterio/kanister/pkg/kube"
 	"github.com/kanisterio/kanister/pkg/param"
 	"github.com/kanisterio/kanister/pkg/progress"
+	"github.com/kanisterio/kanister/pkg/utils"
 )
 
 const (
@@ -68,7 +70,21 @@ func (*deleteDataUsingKopiaServerFunc) Arguments() []string {
 		DeleteDataNamespaceArg,
 		RestoreDataImageArg,
 		KopiaRepositoryServerUserHostname,
+		PodAnnotationsArg,
+		PodLabelsArg,
 	}
+}
+
+func (d *deleteDataUsingKopiaServerFunc) Validate(args map[string]any) error {
+	if err := ValidatePodLabelsAndAnnotations(d.Name(), args); err != nil {
+		return err
+	}
+
+	if err := utils.CheckSupportedArgs(d.Arguments(), args); err != nil {
+		return err
+	}
+
+	return utils.CheckRequiredArgs(d.RequiredArgs(), args)
 }
 
 func (d *deleteDataUsingKopiaServerFunc) Exec(ctx context.Context, tp param.TemplateParams, args map[string]any) (map[string]any, error) {
@@ -77,11 +93,13 @@ func (d *deleteDataUsingKopiaServerFunc) Exec(ctx context.Context, tp param.Temp
 	defer func() { d.progressPercent = progress.CompletedPercent }()
 
 	var (
-		err          error
-		image        string
-		namespace    string
-		snapID       string
-		userHostname string
+		err           error
+		image         string
+		namespace     string
+		snapID        string
+		userHostname  string
+		bpAnnotations map[string]string
+		bpLabels      map[string]string
 	)
 	if err = Arg(args, DeleteDataBackupIdentifierArg, &snapID); err != nil {
 		return nil, err
@@ -94,6 +112,26 @@ func (d *deleteDataUsingKopiaServerFunc) Exec(ctx context.Context, tp param.Temp
 	}
 	if err = OptArg(args, KopiaRepositoryServerUserHostname, &userHostname, ""); err != nil {
 		return nil, err
+	}
+	if err = OptArg(args, PodAnnotationsArg, &bpAnnotations, nil); err != nil {
+		return nil, err
+	}
+	if err = OptArg(args, PodLabelsArg, &bpLabels, nil); err != nil {
+		return nil, err
+	}
+
+	annotations := bpAnnotations
+	labels := bpLabels
+	if tp.PodAnnotations != nil {
+		// merge the actionset annotations with blueprint annotations
+		var actionSetAnn ActionSetAnnotations = tp.PodAnnotations
+		annotations = actionSetAnn.MergeBPAnnotations(bpAnnotations)
+	}
+
+	if tp.PodLabels != nil {
+		// merge the actionset labels with blueprint labels
+		var actionSetLabels ActionSetLabels = tp.PodLabels
+		labels = actionSetLabels.MergeBPLabels(bpLabels)
 	}
 
 	userPassphrase, cert, err := userCredentialsAndServerTLS(&tp)
@@ -128,6 +166,8 @@ func (d *deleteDataUsingKopiaServerFunc) Exec(ctx context.Context, tp param.Temp
 		snapID,
 		tp.RepositoryServer.Username,
 		userAccessPassphrase,
+		annotations,
+		labels,
 	)
 }
 
@@ -151,13 +191,21 @@ func deleteDataFromServer(
 	snapID,
 	username,
 	userPassphrase string,
+	annotations,
+	labels map[string]string,
 ) (map[string]any, error) {
 	options := &kube.PodOptions{
 		Namespace:    namespace,
 		GenerateName: jobPrefix,
 		Image:        image,
 		Command:      []string{"bash", "-c", "tail -f /dev/null"},
+		Annotations:  annotations,
+		Labels:       labels,
 	}
+
+	// Apply the registered ephemeral pod changes.
+	ephemeral.PodOptions.Apply(options)
+
 	pr := kube.NewPodRunner(cli, options)
 	podFunc := deleteDataFromServerPodFunc(
 		hostname,

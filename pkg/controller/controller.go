@@ -27,7 +27,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/kanisterio/kanister/pkg/customresource"
+	osversioned "github.com/openshift/client-go/apps/clientset/versioned"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	"gopkg.in/tomb.v2"
@@ -46,15 +46,16 @@ import (
 	"github.com/kanisterio/kanister/pkg/client/clientset/versioned"
 	"github.com/kanisterio/kanister/pkg/client/clientset/versioned/scheme"
 	"github.com/kanisterio/kanister/pkg/consts"
+	"github.com/kanisterio/kanister/pkg/customresource"
 	"github.com/kanisterio/kanister/pkg/eventer"
 	"github.com/kanisterio/kanister/pkg/field"
 	"github.com/kanisterio/kanister/pkg/log"
-	_ "github.com/kanisterio/kanister/pkg/metrics"
 	"github.com/kanisterio/kanister/pkg/param"
 	"github.com/kanisterio/kanister/pkg/progress"
 	"github.com/kanisterio/kanister/pkg/reconcile"
 	"github.com/kanisterio/kanister/pkg/validate"
-	osversioned "github.com/openshift/client-go/apps/clientset/versioned"
+
+	_ "github.com/kanisterio/kanister/pkg/metrics"
 )
 
 // Controller represents a controller object for kanister custom resources
@@ -441,12 +442,12 @@ func (c *Controller) runAction(ctx context.Context, t *tomb.Tomb, as *crv1alpha1
 	c.logAndSuccessEvent(ctx, fmt.Sprintf("Executing action %s", action.Name), "Started Action", as)
 	tp, err := param.New(ctx, c.clientset, c.dynClient, c.crClient, c.osClient, action)
 	if err != nil {
-		c.incrementActionSetResolutionCounterVec(ACTION_SET_COUNTER_VEC_LABEL_RES_FAILURE)
+		c.incrementActionSetResolutionCounterVec(ActionSetCounterVecLabelResFailure)
 		return err
 	}
 	phases, err := kanister.GetPhases(*bp, action.Name, action.PreferredVersion, *tp)
 	if err != nil {
-		c.incrementActionSetResolutionCounterVec(ACTION_SET_COUNTER_VEC_LABEL_RES_FAILURE)
+		c.incrementActionSetResolutionCounterVec(ActionSetCounterVecLabelResFailure)
 		return err
 	}
 
@@ -454,7 +455,7 @@ func (c *Controller) runAction(ctx context.Context, t *tomb.Tomb, as *crv1alpha1
 	// can be specified in blueprint using actions[name].deferPhase
 	deferPhase, err := kanister.GetDeferPhase(*bp, action.Name, action.PreferredVersion, *tp)
 	if err != nil {
-		c.incrementActionSetResolutionCounterVec(ACTION_SET_COUNTER_VEC_LABEL_RES_FAILURE)
+		c.incrementActionSetResolutionCounterVec(ActionSetCounterVecLabelResFailure)
 		return err
 	}
 
@@ -469,10 +470,11 @@ func (c *Controller) runAction(ctx context.Context, t *tomb.Tomb, as *crv1alpha1
 			}
 			// render artifacts only if all the phases are run successfully
 			if deferErr == nil && coreErr == nil {
-				c.renderActionsetArtifacts(ctx, as, aIDX, as.Namespace, as.Name, action.Name, bp, tp, coreErr, deferErr)
-				c.incrementActionSetResolutionCounterVec(ACTION_SET_COUNTER_VEC_LABEL_RES_SUCCESS)
+				c.renderActionsetArtifacts(ctx, as, aIDX, as.Namespace, as.Name, action.Name, bp, tp)
+				c.maybeSetActionSetStateComplete(ctx, as, aIDX, bp, coreErr, deferErr)
+				c.incrementActionSetResolutionCounterVec(ActionSetCounterVecLabelResSuccess)
 			} else {
-				c.incrementActionSetResolutionCounterVec(ACTION_SET_COUNTER_VEC_LABEL_RES_FAILURE)
+				c.incrementActionSetResolutionCounterVec(ActionSetCounterVecLabelResFailure)
 			}
 		}()
 
@@ -639,23 +641,13 @@ func (c *Controller) renderActionsetArtifacts(ctx context.Context,
 	actionsetNS, actionsetName, actionName string,
 	bp *crv1alpha1.Blueprint,
 	tp *param.TemplateParams,
-	coreErr, deferErr error,
 ) {
 	// Check if output artifacts are present
 	artTpls := as.Status.Actions[aIDX].Artifacts
 	if len(artTpls) == 0 {
-		// No artifacts, set ActionSetStatus to complete
-		if rErr := reconcile.ActionSet(ctx, c.crClient.CrV1alpha1(), actionsetNS, actionsetName, func(ras *crv1alpha1.ActionSet) error {
-			// actionset execution is done, set the RunningPhase to empty string
-			ras.Status.Progress.RunningPhase = ""
-			if coreErr == nil && deferErr == nil {
-				ras.Status.State = crv1alpha1.StateComplete
-			} else {
-				ras.Status.State = crv1alpha1.StateFailed
-			}
-
-			return nil
-		}); rErr != nil {
+		// No artifacts, will only update action status if failed
+		af := updateActionSetArtifactsFun(aIDX, artTpls)
+		if rErr := reconcile.ActionSet(ctx, c.crClient.CrV1alpha1(), actionsetNS, actionsetName, af); rErr != nil {
 			reason := fmt.Sprintf("ActionSetFailed Action: %s", actionName)
 			msg := fmt.Sprintf("Failed to update ActionSet: %s", actionsetName)
 			c.logAndErrorEvent(ctx, msg, reason, rErr, as, bp)
@@ -675,19 +667,7 @@ func (c *Controller) renderActionsetArtifacts(ctx context.Context,
 			return nil
 		}
 	} else {
-		af = func(ras *crv1alpha1.ActionSet) error {
-			ras.Status.Actions[aIDX].Artifacts = arts
-			// actionset execution is done and artifacts are rendered, set the RunningPhase to empty string
-			ras.Status.Progress.RunningPhase = ""
-			// make sure that the core phases that were run also didnt return any error
-			// and then set actionset's state to be complete
-			if coreErr == nil && deferErr == nil {
-				ras.Status.State = crv1alpha1.StateComplete
-			} else {
-				ras.Status.State = crv1alpha1.StateFailed
-			}
-			return nil
-		}
+		af = updateActionSetArtifactsFun(aIDX, arts)
 	}
 	// Update ActionSet
 	if aErr := reconcile.ActionSet(ctx, c.crClient.CrV1alpha1(), actionsetNS, actionsetName, af); aErr != nil {
@@ -702,6 +682,53 @@ func (c *Controller) renderActionsetArtifacts(ctx context.Context,
 		msg := "Failed to render output artifacts"
 		c.logAndErrorEvent(ctx, msg, reason, err, as, bp)
 		return
+	}
+}
+
+func (c *Controller) maybeSetActionSetStateComplete(ctx context.Context,
+	as *crv1alpha1.ActionSet,
+	aIDX int,
+	bp *crv1alpha1.Blueprint,
+	coreErr, deferErr error,
+) {
+	af := func(ras *crv1alpha1.ActionSet) error {
+		// Running phase is in the current action, TODO: #2270 track multiple phases
+		if isPhaseInAction(ras.Status.Progress.RunningPhase, ras.Status.Actions[aIDX]) {
+			// set the RunningPhase to empty string
+			ras.Status.Progress.RunningPhase = ""
+		}
+
+		// make sure that the core phases that were run also didnt return any error
+		// and then set actionset's state to be complete
+		if coreErr != nil || deferErr != nil {
+			ras.Status.State = crv1alpha1.StateFailed
+			return nil
+		}
+
+		for _, as := range ras.Status.Actions {
+			for _, p := range as.Phases {
+				if p.State != crv1alpha1.StateComplete {
+					log.WithContext(ctx).Print(
+						"Finished action, but other action's phase is still running. Not setting state to complete.",
+						field.M{
+							"Status": ras.Status.State,
+							"Action": ras.Status.Actions[aIDX].Name,
+							"Phase":  fmt.Sprintf("%s->%s", p.Name, p.State)})
+					return nil
+				}
+			}
+		}
+
+		// Set state to complete if it wasn't failed already
+		if ras.Status.State != crv1alpha1.StateFailed {
+			ras.Status.State = crv1alpha1.StateComplete
+		}
+		return nil
+	}
+	if rErr := reconcile.ActionSet(ctx, c.crClient.CrV1alpha1(), as.Namespace, as.Name, af); rErr != nil {
+		reason := fmt.Sprintf("ActionSetFailed Action: %s", as.Status.Actions[aIDX].Name)
+		msg := fmt.Sprintf("Failed to update ActionSet: %s", as.Name)
+		c.logAndErrorEvent(ctx, msg, reason, rErr, as, bp)
 	}
 }
 
@@ -744,4 +771,20 @@ func setObjectKind(obj runtime.Object) {
 		gvk.Kind = reflect.TypeOf(obj).Elem().Name()
 	}
 	ok.SetGroupVersionKind(gvk)
+}
+
+func updateActionSetArtifactsFun(aIDX int, arts map[string]crv1alpha1.Artifact) func(*crv1alpha1.ActionSet) error {
+	return func(ras *crv1alpha1.ActionSet) error {
+		ras.Status.Actions[aIDX].Artifacts = arts
+		return nil
+	}
+}
+
+func isPhaseInAction(phaseName string, actionStatus crv1alpha1.ActionStatus) bool {
+	for _, p := range actionStatus.Phases {
+		if p.Name == phaseName {
+			return true
+		}
+	}
+	return actionStatus.DeferPhase.Name == phaseName
 }

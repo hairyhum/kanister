@@ -34,6 +34,7 @@ import (
 	"github.com/kanisterio/kanister/pkg/param"
 	"github.com/kanisterio/kanister/pkg/postgres"
 	"github.com/kanisterio/kanister/pkg/progress"
+	"github.com/kanisterio/kanister/pkg/utils"
 )
 
 func init() {
@@ -69,6 +70,8 @@ const (
 	RestoreRDSSnapshotUsername = "username"
 	// RestoreRDSSnapshotPassword stores the password of the database
 	RestoreRDSSnapshotPassword = "password"
+	// RestoreRDSSnapshotImage provides the image of the container with required tools
+	RestoreRDSSnapshotImage = "image"
 
 	// PostgreSQLEngine stores the postgres appname
 	PostgreSQLEngine RDSDBEngine = "PostgreSQL"
@@ -102,7 +105,21 @@ func (*restoreRDSSnapshotFunc) Arguments() []string {
 		RestoreRDSSnapshotNamespace,
 		RestoreRDSSnapshotSecGrpID,
 		RestoreRDSSnapshotDBSubnetGroup,
+		PodAnnotationsArg,
+		PodLabelsArg,
 	}
+}
+
+func (r *restoreRDSSnapshotFunc) Validate(args map[string]any) error {
+	if err := ValidatePodLabelsAndAnnotations(r.Name(), args); err != nil {
+		return err
+	}
+
+	if err := utils.CheckSupportedArgs(r.Arguments(), args); err != nil {
+		return err
+	}
+
+	return utils.CheckRequiredArgs(r.RequiredArgs(), args)
 }
 
 func (r *restoreRDSSnapshotFunc) Exec(ctx context.Context, tp param.TemplateParams, args map[string]interface{}) (map[string]interface{}, error) {
@@ -110,8 +127,9 @@ func (r *restoreRDSSnapshotFunc) Exec(ctx context.Context, tp param.TemplatePara
 	r.progressPercent = progress.StartedPercent
 	defer func() { r.progressPercent = progress.CompletedPercent }()
 
-	var namespace, instanceID, subnetGroup, snapshotID, backupArtifactPrefix, backupID, username, password string
+	var namespace, instanceID, subnetGroup, snapshotID, backupArtifactPrefix, backupID, username, password, postgresToolsImage string
 	var dbEngine RDSDBEngine
+	var bpAnnotations, bpLabels map[string]string
 
 	if err := Arg(args, RestoreRDSSnapshotInstanceID, &instanceID); err != nil {
 		return nil, err
@@ -127,6 +145,30 @@ func (r *restoreRDSSnapshotFunc) Exec(ctx context.Context, tp param.TemplatePara
 	if err := OptArg(args, RestoreRDSSnapshotDBSubnetGroup, &subnetGroup, "default"); err != nil {
 		return nil, err
 	}
+	if err := OptArg(args, RestoreRDSSnapshotImage, &postgresToolsImage, defaultPostgresToolsImage); err != nil {
+		return nil, err
+	}
+	if err := OptArg(args, PodAnnotationsArg, &bpAnnotations, nil); err != nil {
+		return nil, err
+	}
+	if err := OptArg(args, PodLabelsArg, &bpLabels, nil); err != nil {
+		return nil, err
+	}
+
+	annotations := bpAnnotations
+	labels := bpLabels
+	if tp.PodAnnotations != nil {
+		// merge the actionset annotations with blueprint annotations
+		var actionSetAnn ActionSetAnnotations = tp.PodAnnotations
+		annotations = actionSetAnn.MergeBPAnnotations(bpAnnotations)
+	}
+
+	if tp.PodLabels != nil {
+		// merge the actionset labels with blueprint labels
+		var actionSetLabels ActionSetLabels = tp.PodLabels
+		labels = actionSetLabels.MergeBPLabels(bpLabels)
+	}
+
 	// Find security groups
 	sgIDs, err := GetYamlList(args, RestoreRDSSnapshotSecGrpID)
 	if err != nil {
@@ -153,7 +195,23 @@ func (r *restoreRDSSnapshotFunc) Exec(ctx context.Context, tp param.TemplatePara
 		}
 	}
 
-	return restoreRDSSnapshot(ctx, namespace, instanceID, subnetGroup, snapshotID, backupArtifactPrefix, backupID, username, password, dbEngine, sgIDs, tp.Profile)
+	return restoreRDSSnapshot(
+		ctx,
+		namespace,
+		instanceID,
+		subnetGroup,
+		snapshotID,
+		backupArtifactPrefix,
+		backupID,
+		username,
+		password,
+		dbEngine,
+		sgIDs,
+		tp.Profile,
+		postgresToolsImage,
+		annotations,
+		labels,
+	)
 }
 
 func (r *restoreRDSSnapshotFunc) ExecutionProgress() (crv1alpha1.PhaseProgress, error) {
@@ -177,6 +235,9 @@ func restoreRDSSnapshot(
 	dbEngine RDSDBEngine,
 	sgIDs []string,
 	profile *param.Profile,
+	postgresToolsImage string,
+	annotations,
+	labels map[string]string,
 ) (map[string]interface{}, error) {
 	// Validate profile
 	if err := ValidateProfile(profile); err != nil {
@@ -224,7 +285,23 @@ func restoreRDSSnapshot(
 		return nil, errors.Wrapf(err, "Couldn't find DBInstance Version")
 	}
 
-	if _, err = execDumpCommand(ctx, dbEngine, RestoreAction, namespace, dbEndpoint, username, password, nil, backupArtifactPrefix, backupID, profile, dbEngineVersion); err != nil {
+	if _, err = execDumpCommand(
+		ctx,
+		dbEngine,
+		RestoreAction,
+		namespace,
+		dbEndpoint,
+		username,
+		password,
+		nil,
+		backupArtifactPrefix,
+		backupID,
+		profile,
+		dbEngineVersion,
+		postgresToolsImage,
+		annotations,
+		labels,
+	); err != nil {
 		return nil, errors.Wrapf(err, "Failed to restore RDS from dump. InstanceID=%s", instanceID)
 	}
 

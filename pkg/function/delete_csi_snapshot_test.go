@@ -95,7 +95,7 @@ func (testSuite *DeleteCSISnapshotTestSuite) TestDeleteCSISnapshot(c *C) {
 			Spec: corev1.PersistentVolumeClaimSpec{
 				StorageClassName: &testSuite.storageClass,
 				AccessModes:      []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
-				Resources: corev1.ResourceRequirements{
+				Resources: corev1.VolumeResourceRequirements{
 					Requests: corev1.ResourceList{
 						corev1.ResourceStorage: resource.MustParse("1Gi"),
 					},
@@ -104,8 +104,11 @@ func (testSuite *DeleteCSISnapshotTestSuite) TestDeleteCSISnapshot(c *C) {
 		}
 		_, err = fakeCli.CoreV1().PersistentVolumeClaims(testSuite.namespace).Create(ctx, originalPVC, metav1.CreateOptions{})
 		c.Assert(err, IsNil)
-
-		err = fakeSnapshotter.Create(ctx, testSuite.snapName, testSuite.namespace, testSuite.pvcName, &testSuite.volumeSnapshotClass, false, nil)
+		fakeSnapshotMeta := snapshot.ObjectMeta{
+			Name:      testSuite.snapName,
+			Namespace: testSuite.namespace,
+		}
+		err = fakeSnapshotter.Create(ctx, testSuite.pvcName, &testSuite.volumeSnapshotClass, false, fakeSnapshotMeta)
 		c.Assert(err, IsNil)
 
 		vs, err := fakeSnapshotter.Get(ctx, testSuite.snapName, testSuite.namespace)

@@ -17,15 +17,16 @@ package snapshot
 import (
 	"context"
 
-	"github.com/kanisterio/kanister/pkg/blockstorage"
+	"github.com/kanisterio/errkit"
 	v1 "github.com/kubernetes-csi/external-snapshotter/client/v4/apis/volumesnapshot/v1"
-	"github.com/pkg/errors"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/uuid"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
+
+	"github.com/kanisterio/kanister/pkg/blockstorage"
 )
 
 const (
@@ -69,8 +70,8 @@ func (sna *SnapshotStable) GetVolumeSnapshotClass(ctx context.Context, annotatio
 }
 
 // Create creates a VolumeSnapshot and returns it or any error happened meanwhile.
-func (sna *SnapshotStable) Create(ctx context.Context, name, namespace, volumeName string, snapshotClass *string, waitForReady bool, labels map[string]string) error {
-	return createSnapshot(ctx, sna.dynCli, sna.kubeCli, VolSnapGVR, name, namespace, volumeName, snapshotClass, waitForReady, labels)
+func (sna *SnapshotStable) Create(ctx context.Context, volumeName string, snapshotClass *string, waitForReady bool, snapshotMeta ObjectMeta) error {
+	return createSnapshot(ctx, sna.dynCli, sna.kubeCli, VolSnapGVR, volumeName, snapshotClass, waitForReady, snapshotMeta)
 }
 
 // Get will return the VolumeSnapshot in the 'namespace' with given 'name'.
@@ -90,7 +91,7 @@ func (sna *SnapshotStable) Delete(ctx context.Context, name, namespace string) (
 // DeleteContent will delete the specified VolumeSnapshotContent
 func (sna *SnapshotStable) DeleteContent(ctx context.Context, name string) error {
 	if err := sna.dynCli.Resource(VolSnapContentGVR).Delete(ctx, name, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
-		return errors.Wrapf(err, "Failed to delete VolumeSnapshotContent: %s", name)
+		return errkit.Wrap(err, "Failed to delete", "volumeSnapshotContent", name)
 	}
 	// If the Snapshot Content does not exist, that's an acceptable error and we ignore it
 	return nil
@@ -98,20 +99,20 @@ func (sna *SnapshotStable) DeleteContent(ctx context.Context, name string) error
 
 // Clone will clone the VolumeSnapshot to namespace 'cloneNamespace'.
 // Underlying VolumeSnapshotContent will be cloned with a different name.
-func (sna *SnapshotStable) Clone(ctx context.Context, name, namespace, cloneName, cloneNamespace string, waitForReady bool, labels map[string]string) error {
-	_, err := sna.Get(ctx, cloneName, cloneNamespace)
+func (sna *SnapshotStable) Clone(ctx context.Context, name, namespace string, waitForReady bool, snapshotMeta, snapshotContentMeta ObjectMeta) error {
+	_, err := sna.Get(ctx, snapshotMeta.Name, snapshotMeta.Namespace)
 	if err == nil {
-		return errors.Errorf("Target snapshot already exists in target namespace, Volumesnapshot: %s, Namespace: %s", cloneName, cloneNamespace)
+		return errkit.New("Target snapshot already exists in target namespace", "volumeSnapshot", snapshotMeta.Name, "namespace", snapshotMeta.Namespace)
 	}
 	if !apierrors.IsNotFound(err) {
-		return errors.Errorf("Failed to query target Volumesnapshot: %s, Namespace: %s: %v", cloneName, cloneNamespace, err)
+		return errkit.Wrap(err, "Failed to query target", "volumeSnapshot", snapshotMeta.Name, "namespace", snapshotMeta.Namespace)
 	}
 
 	src, err := sna.GetSource(ctx, name, namespace)
 	if err != nil {
-		return errors.Errorf("Failed to get source")
+		return errkit.New("Failed to get source")
 	}
-	return sna.CreateFromSource(ctx, src, cloneName, cloneNamespace, waitForReady, labels)
+	return sna.CreateFromSource(ctx, src, waitForReady, snapshotMeta, snapshotContentMeta)
 }
 
 // GetSource will return the CSI source that backs the volume snapshot.
@@ -120,41 +121,31 @@ func (sna *SnapshotStable) GetSource(ctx context.Context, snapshotName, namespac
 }
 
 // CreateFromSource will create a 'Volumesnapshot' and 'VolumesnaphotContent' pair for the underlying snapshot source.
-func (sna *SnapshotStable) CreateFromSource(ctx context.Context, source *Source, snapshotName, namespace string, waitForReady bool, labels map[string]string) error {
+func (sna *SnapshotStable) CreateFromSource(ctx context.Context, source *Source, waitForReady bool, snapshotMeta, snapshotContentMeta ObjectMeta) error {
 	deletionPolicy, err := getDeletionPolicyFromClass(sna.dynCli, VolSnapClassGVR, source.VolumeSnapshotClassName)
 	if err != nil {
-		return errors.Wrap(err, "Failed to get DeletionPolicy from VolumeSnapshotClass")
+		return errkit.Wrap(err, "Failed to get DeletionPolicy from VolumeSnapshotClass")
 	}
-	contentName := snapshotName + "-content-" + string(uuid.NewUUID())
+	snapshotContentMeta.Name = snapshotMeta.Name + "-content-" + string(uuid.NewUUID())
+	snapshotMeta.Labels = blockstorage.SanitizeTags(snapshotMeta.Labels)
 	snap := UnstructuredVolumeSnapshot(
 		VolSnapGVR,
-		snapshotName,
-		namespace,
 		"",
-		contentName,
 		source.VolumeSnapshotClassName,
-		blockstorage.SanitizeTags(labels),
+		snapshotMeta,
+		snapshotContentMeta,
 	)
 
-	if err := sna.CreateContentFromSource(ctx, source, contentName, snapshotName, namespace, deletionPolicy); err != nil {
+	if err := sna.CreateContentFromSource(ctx, source, snapshotMeta.Name, snapshotMeta.Namespace, deletionPolicy, snapshotContentMeta); err != nil {
 		return err
 	}
-	if _, err := sna.dynCli.Resource(VolSnapGVR).Namespace(namespace).Create(ctx, snap, metav1.CreateOptions{}); err != nil {
-		return errors.Errorf("Failed to create content, Volumesnapshot: %s, Error: %v", snap.GetName(), err)
+	if _, err := sna.dynCli.Resource(VolSnapGVR).Namespace(snapshotMeta.Namespace).Create(ctx, snap, metav1.CreateOptions{}); err != nil {
+		return errkit.Wrap(err, "Failed to create content", "volumeSnapshot", snap.GetName())
 	}
 	if !waitForReady {
 		return nil
 	}
-	if source.Driver == DellFlexOSDriver {
-		// Temporary work around till upstream issue is resolved-
-		// github- https://github.com/dell/csi-vxflexos/pull/11
-		// forum- https://www.dell.com/community/Containers/Issue-where-volumeSnapshots-have-ReadyToUse-field-set-to-false/m-p/7685881#M249
-		err := sna.UpdateVolumeSnapshotStatusStable(ctx, namespace, snap.GetName(), true)
-		if err != nil {
-			return err
-		}
-	}
-	err = sna.WaitOnReadyToUse(ctx, snapshotName, namespace)
+	err = sna.WaitOnReadyToUse(ctx, snapshotMeta.Name, snapshotMeta.Namespace)
 	return err
 }
 
@@ -164,10 +155,10 @@ func (sna *SnapshotStable) UpdateVolumeSnapshotStatusStable(ctx context.Context,
 }
 
 // CreateContentFromSource will create a 'VolumesnaphotContent' for the underlying snapshot source.
-func (sna *SnapshotStable) CreateContentFromSource(ctx context.Context, source *Source, contentName, snapshotName, namespace, deletionPolicy string) error {
-	content := UnstructuredVolumeSnapshotContent(VolSnapContentGVR, contentName, snapshotName, namespace, deletionPolicy, source.Driver, source.Handle, source.VolumeSnapshotClassName)
+func (sna *SnapshotStable) CreateContentFromSource(ctx context.Context, source *Source, snapshotName, snapshotNS, deletionPolicy string, snapshotContentMeta ObjectMeta) error {
+	content := UnstructuredVolumeSnapshotContent(VolSnapContentGVR, snapshotName, snapshotNS, deletionPolicy, source.Driver, source.Handle, source.VolumeSnapshotClassName, snapshotContentMeta)
 	if _, err := sna.dynCli.Resource(VolSnapContentGVR).Create(ctx, content, metav1.CreateOptions{}); err != nil {
-		return errors.Errorf("Failed to create content, VolumesnapshotContent: %s, Error: %v", content.GetName(), err)
+		return errkit.Wrap(err, "Failed to create content", "volumeSnapshotContent", content.GetName())
 	}
 	return nil
 }

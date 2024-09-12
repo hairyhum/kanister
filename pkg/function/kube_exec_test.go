@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"strings"
 
+	osversioned "github.com/openshift/client-go/apps/clientset/versioned"
 	. "gopkg.in/check.v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -33,7 +34,6 @@ import (
 	"github.com/kanisterio/kanister/pkg/param"
 	"github.com/kanisterio/kanister/pkg/resource"
 	"github.com/kanisterio/kanister/pkg/testutil"
-	osversioned "github.com/openshift/client-go/apps/clientset/versioned"
 )
 
 type KubeExecTest struct {
@@ -179,11 +179,11 @@ func (s *KubeExecTest) TestParseLogAndCreateOutput(c *C) {
 		errChecker Checker
 		outChecker Checker
 	}{
-		{"###Phase-output###: {\"key\":\"version\",\"value\":\"0.104.0\"}", map[string]interface{}{"version": "0.104.0"}, IsNil, NotNil},
-		{"###Phase-output###: {\"key\":\"version\",\"value\":\"0.104.0\"}\n###Phase-output###: {\"key\":\"path\",\"value\":\"/backup/path\"}",
-			map[string]interface{}{"version": "0.104.0", "path": "/backup/path"}, IsNil, NotNil},
-		{"Random message ###Phase-output###: {\"key\":\"version\",\"value\":\"0.104.0\"}", map[string]interface{}{"version": "0.104.0"}, IsNil, NotNil},
-		{"Random message with newline \n###Phase-output###: {\"key\":\"version\",\"value\":\"0.104.0\"}", map[string]interface{}{"version": "0.104.0"}, IsNil, NotNil},
+		{"###Phase-output###: {\"key\":\"version\",\"value\":\"0.110.0\"}", map[string]interface{}{"version": "0.110.0"}, IsNil, NotNil},
+		{"###Phase-output###: {\"key\":\"version\",\"value\":\"0.110.0\"}\n###Phase-output###: {\"key\":\"path\",\"value\":\"/backup/path\"}",
+			map[string]interface{}{"version": "0.110.0", "path": "/backup/path"}, IsNil, NotNil},
+		{"Random message ###Phase-output###: {\"key\":\"version\",\"value\":\"0.110.0\"}", map[string]interface{}{"version": "0.110.0"}, IsNil, NotNil},
+		{"Random message with newline \n###Phase-output###: {\"key\":\"version\",\"value\":\"0.110.0\"}", map[string]interface{}{"version": "0.110.0"}, IsNil, NotNil},
 		{"###Phase-output###: Invalid message", nil, NotNil, IsNil},
 		{"Random message", nil, IsNil, IsNil},
 	} {

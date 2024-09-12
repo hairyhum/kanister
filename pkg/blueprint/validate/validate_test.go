@@ -23,7 +23,9 @@ import (
 
 	kanister "github.com/kanisterio/kanister/pkg"
 	crv1alpha1 "github.com/kanisterio/kanister/pkg/apis/cr/v1alpha1"
+	"github.com/kanisterio/kanister/pkg/function"
 	"github.com/kanisterio/kanister/pkg/param"
+	"github.com/kanisterio/kanister/pkg/utils"
 )
 
 func Test(t *testing.T) { TestingT(t) }
@@ -342,6 +344,110 @@ func (v *ValidateBlueprint) TestValidateNonDefaultVersion(c *C) {
 	}
 }
 
+func (v *ValidateBlueprint) TestValidateAnnLabelArgs(c *C) {
+	for _, tc := range []struct {
+		labels      interface{}
+		annotations interface{}
+		error       string
+	}{
+		{
+			labels: map[string]interface{}{
+				"key": "value",
+			},
+			error: "",
+		},
+		{
+			annotations: map[string]interface{}{
+				"key": "value",
+			},
+			error: "",
+		},
+		{
+			labels: map[string]interface{}{
+				"key": "value",
+			},
+			annotations: map[string]interface{}{
+				"key": "value",
+			},
+			error: "",
+		},
+		{
+			labels: map[string]interface{}{
+				"key$": "value",
+			},
+			annotations: map[string]interface{}{
+				"key": "value",
+			},
+			error: "label key 'key$' failed validation",
+		},
+		{
+			labels: map[string]interface{}{
+				"key*": "value",
+			},
+			annotations: map[string]interface{}{
+				"key": "value",
+			},
+			error: "label key 'key*' failed validation",
+		},
+		{
+			labels: map[string]interface{}{
+				"key": "value$",
+			},
+			annotations: map[string]interface{}{
+				"key": "value",
+			},
+			error: "label value 'value$' failed validation",
+		},
+		{
+			labels: map[string]interface{}{
+				"key": "value",
+			},
+			annotations: map[string]interface{}{
+				"key$": "value",
+			},
+			error: "annotation key 'key$' failed validation",
+		},
+		{
+			labels: map[string]interface{}{
+				"key": "value",
+			},
+			annotations: map[string]interface{}{
+				"key": "value$",
+			},
+			error: "",
+		},
+		{
+			labels: map[string]interface{}{
+				"key": "",
+			},
+			annotations: map[string]interface{}{
+				"key": "",
+			},
+			error: "",
+		},
+	} {
+		bp := blueprint()
+		bp.Actions["backup"].Phases = []crv1alpha1.BlueprintPhase{
+			{
+				Func: "KubeTask",
+				Name: "backup",
+				Args: map[string]interface{}{
+					function.PodLabelsArg:      tc.labels,
+					function.PodAnnotationsArg: tc.annotations,
+					"image":                    "",
+					"command":                  "",
+				},
+			},
+		}
+		err := Do(bp, kanister.DefaultVersion)
+		if tc.error != "" {
+			c.Assert(strings.Contains(err.Error(), tc.error), Equals, true)
+		} else {
+			c.Assert(err, Equals, nil)
+		}
+	}
+}
+
 func (v *ValidateBlueprint) TestValidatePhaseNames(c *C) {
 	for _, tc := range []BlueprintTest{
 		{
@@ -452,6 +558,14 @@ func (nd *nonDefaultVersionFunc) RequiredArgs() []string {
 
 func (nd *nonDefaultVersionFunc) Arguments() []string {
 	return []string{"ndVersionArg0", "ndVersionArg1", "ndVersionArg2", "ndVersionArg3"}
+}
+
+func (nd *nonDefaultVersionFunc) Validate(args map[string]any) error {
+	if err := utils.CheckSupportedArgs(nd.Arguments(), args); err != nil {
+		return err
+	}
+
+	return utils.CheckRequiredArgs(nd.RequiredArgs(), args)
 }
 
 func (nd *nonDefaultVersionFunc) Exec(context.Context, param.TemplateParams, map[string]interface{}) (map[string]interface{}, error) {

@@ -22,7 +22,6 @@ import (
 	"text/template"
 	"time"
 
-	"github.com/Masterminds/sprig"
 	"github.com/pkg/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -33,11 +32,13 @@ import (
 	crv1alpha1 "github.com/kanisterio/kanister/pkg/apis/cr/v1alpha1"
 	"github.com/kanisterio/kanister/pkg/field"
 	"github.com/kanisterio/kanister/pkg/jsonpath"
+	"github.com/kanisterio/kanister/pkg/ksprig"
 	"github.com/kanisterio/kanister/pkg/kube"
 	"github.com/kanisterio/kanister/pkg/log"
 	"github.com/kanisterio/kanister/pkg/param"
 	"github.com/kanisterio/kanister/pkg/poll"
 	"github.com/kanisterio/kanister/pkg/progress"
+	"github.com/kanisterio/kanister/pkg/utils"
 )
 
 type WaitConditions struct {
@@ -119,6 +120,14 @@ func (*waitFunc) Arguments() []string {
 	}
 }
 
+func (w *waitFunc) Validate(args map[string]any) error {
+	if err := utils.CheckSupportedArgs(w.Arguments(), args); err != nil {
+		return err
+	}
+
+	return utils.CheckRequiredArgs(w.RequiredArgs(), args)
+}
+
 func (w *waitFunc) ExecutionProgress() (crv1alpha1.PhaseProgress, error) {
 	metav1Time := metav1.NewTime(time.Now())
 	return crv1alpha1.PhaseProgress{
@@ -189,7 +198,7 @@ func evaluateWaitCondition(ctx context.Context, dynCli dynamic.Interface, cond C
 		return false, err
 	}
 	log.Debug().Print(fmt.Sprintf("Resolved jsonpath: %s", rcondition))
-	t, err := template.New("config").Option("missingkey=zero").Funcs(sprig.TxtFuncMap()).Parse(rcondition)
+	t, err := template.New("config").Option("missingkey=zero").Funcs(ksprig.TxtFuncMap()).Parse(rcondition)
 	if err != nil {
 		return false, errors.WithStack(err)
 	}
