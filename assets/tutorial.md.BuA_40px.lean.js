@@ -1,0 +1,1 @@
+import{_ as s,c as i,o as a,V as n}from"./chunks/framework.DyV3CXln.js";const g=JSON.parse('{"title":"Tutorial","description":"","frontmatter":{},"headers":[],"relativePath":"tutorial.md","filePath":"tutorial.md"}'),t={name:"tutorial.md"},e=n("",83),l=[e];function p(h,k,r,E,d,c){return a(),i("div",null,l)}const y=s(t,[["render",p]]);export{g as __pageData,y as default};

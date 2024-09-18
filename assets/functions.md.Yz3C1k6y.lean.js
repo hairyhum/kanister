@@ -1,0 +1,1 @@
+import{_ as s,c as t,o as i,V as a}from"./chunks/framework.DyV3CXln.js";const g=JSON.parse('{"title":"Functions","description":"","frontmatter":{},"headers":[],"relativePath":"functions.md","filePath":"functions.md"}'),e={name:"functions.md"},n=a("",268),p=[n];function h(l,d,k,r,o,c){return i(),t("div",null,p)}const y=s(e,[["render",h]]);export{g as __pageData,y as default};

@@ -1,0 +1,1 @@
+import{_ as s,c as i,o as a,V as e}from"./chunks/framework.DyV3CXln.js";const F=JSON.parse('{"title":"Installation","description":"","frontmatter":{},"headers":[],"relativePath":"install.md","filePath":"install.md"}'),t={name:"install.md"},n=e("",29),l=[n];function h(r,p,o,k,d,c){return a(),i("div",null,l)}const u=s(t,[["render",h]]);export{F as __pageData,u as default};
