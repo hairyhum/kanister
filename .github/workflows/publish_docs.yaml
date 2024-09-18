@@ -49,7 +49,7 @@ jobs:
         run: |
           curl https://github.com/kanisterio/kanister/releases/download/${RELEASE_TAG}/helm_index.yaml -o docs_new/.vitepress/dist/index.yaml
       - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808 # v4.3.3
         with:
           path: docs_new/.vitepress/dist
           name: docs
@@ -59,7 +59,7 @@ jobs:
 
     # Grant GITHUB_TOKEN the permissions required to make a Pages deployment
     permissions:
-      pages: write      # to deploy to Pages
+      contents: write   # to deploy to Pages
       id-token: write   # to verify the deployment originates from an appropriate source
 
     # Deploy to the github-pages environment
@@ -67,11 +67,24 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
 
+    env:
+      RELEASE_TAG: ${{ inputs.release_tag }}
+
     # Specify runner + deployment step
     runs-on: ubuntu-latest
     steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4 # or specific "vX.X.X" version tag for this action
+      - uses: actions/checkout@9bb56186c3b09b4f86b1c65136769dd318469633 # v4.1.2
         with:
-          artifact_name: docs
+          ref: kanister-docs
+      - name: Download artifact
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
+        with:
+          name: docs
+      - name: commit_changes
+        run: |
+          git config --global user.name 'Kasten Production'
+          git config --global user.email 'infra@kasten.io'
+          git add -A
+          git commit -s -m "Update docs to ${RELEASE_TAG}"
+      - name: push_changes
+        run: git push origin kanister-docs
