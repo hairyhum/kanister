@@ -88,3 +88,34 @@ jobs:
           git commit -s -m "Update docs to ${RELEASE_TAG}"
       - name: push_changes
         run: git push origin kanister-docs
+
+  publish_charts:
+    permissions:
+      contents: write   # to deploy to Pages
+      id-token: write   # to verify the deployment originates from an appropriate source
+
+    # Deploy to the github-pages environment
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    env:
+      RELEASE_TAG: ${{ inputs.release_tag }}
+
+    # Specify runner + deployment step
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9bb56186c3b09b4f86b1c65136769dd318469633 # v4.1.2
+        with:
+          ref: kanister-charts
+      - name: Download the helm index
+        run: |
+          curl https://github.com/kanisterio/kanister/releases/download/${RELEASE_TAG}/helm_index.yaml -o index.yaml
+      - name: commit_changes
+        run: |
+          git config --global user.name 'Kasten Production'
+          git config --global user.email 'infra@kasten.io'
+          git add -A
+          git commit -s -m "Update chart index to ${RELEASE_TAG}"
+      - name: push_changes
+        run: git push origin kanister-charts
