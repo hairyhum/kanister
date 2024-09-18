@@ -7,7 +7,7 @@ export default defineConfig({
   description: "Application-Specific Data Management",
 
   head: [["link", { rel: "icon", href: "favicon.ico" }]],
-
+  base: "/kanister/",
   themeConfig: {
     // https://vitepress.dev/reference/default-theme-config
     logo: "kanister.svg",
