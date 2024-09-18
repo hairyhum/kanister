@@ -1,0 +1,1 @@
+import{_ as s,c as i,o as a,V as n}from"./chunks/framework.CiLzNYv1.js";const g=JSON.parse('{"title":"Tooling","description":"","frontmatter":{},"headers":[],"relativePath":"tooling.md","filePath":"tooling.md"}'),e={name:"tooling.md"},t=n("",58),l=[t];function p(h,k,r,F,d,c){return a(),i("div",null,l)}const y=s(e,[["render",p]]);export{g as __pageData,y as default};
